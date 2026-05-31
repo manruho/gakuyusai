@@ -23,8 +23,10 @@ type Product = {
 type Settings = {
   public_status_enabled: string;
   sales_open: string;
+  staff_username: string;
   admin_username: string;
   owner_username: string;
+  staff_password_hash: string;
   admin_password_hash: string;
   owner_password_hash: string;
   threshold_low: string;
@@ -63,8 +65,10 @@ const emptyForm: EditForm = {
 const defaultSettings: Settings = {
   public_status_enabled: 'true',
   sales_open: 'true',
+  staff_username: 'staff',
   admin_username: 'admin',
   owner_username: 'owner',
+  staff_password_hash: '',
   admin_password_hash: '',
   owner_password_hash: '',
   threshold_low: '0.15',
@@ -195,12 +199,20 @@ export function AdminPage() {
           <h2>システム設定</h2>
           <div className="form-grid">
             <label>
+              staff username
+              <input value={settings.staff_username} onChange={(e) => setSettings((current) => ({ ...current, staff_username: e.target.value }))} />
+            </label>
+            <label>
               admin username
               <input value={settings.admin_username} onChange={(e) => setSettings((current) => ({ ...current, admin_username: e.target.value }))} />
             </label>
             <label>
               owner username
               <input value={settings.owner_username} onChange={(e) => setSettings((current) => ({ ...current, owner_username: e.target.value }))} />
+            </label>
+            <label>
+              staff password hash
+              <textarea value={settings.staff_password_hash} onChange={(e) => setSettings((current) => ({ ...current, staff_password_hash: e.target.value }))} />
             </label>
             <label>
               admin password hash

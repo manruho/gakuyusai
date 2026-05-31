@@ -10,7 +10,9 @@ declare interface D1Database {
 }
 
 declare interface PagesFunctionContext<Env = Record<string, unknown>> {
+  request: Request;
   env: Env;
+  executionCtx: ExecutionContext;
   next(): Promise<Response>;
 }
 

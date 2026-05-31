@@ -9,6 +9,8 @@ import { cancelSale, listStock, listStockHistory, recordStockEvent } from './ser
 
 type Env = {
   DB: D1Database;
+  STAFF_USERNAME?: string;
+  STAFF_PASSWORD_HASH?: string;
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD_HASH?: string;
   OWNER_USERNAME?: string;
@@ -93,12 +95,22 @@ app.get('/api/public/status', async (c) => {
 
 app.post('/api/auth/login', async (c) => {
   const body = await c.req.json<{ username: string; password: string }>();
+  const staffUsername = (await getSetting(c.env.DB, 'staff_username')) ?? c.env.STAFF_USERNAME ?? 'staff';
+  const staffPasswordHash = (await getSetting(c.env.DB, 'staff_password_hash')) ?? c.env.STAFF_PASSWORD_HASH ?? '';
   const adminUsername = (await getSetting(c.env.DB, 'admin_username')) ?? c.env.ADMIN_USERNAME ?? 'admin';
   const ownerUsername = (await getSetting(c.env.DB, 'owner_username')) ?? c.env.OWNER_USERNAME ?? 'owner';
+  const staffPasswordHashFallback = staffPasswordHash;
   const adminPasswordHash = (await getSetting(c.env.DB, 'admin_password_hash')) ?? c.env.ADMIN_PASSWORD_HASH ?? '';
   const ownerPasswordHash = (await getSetting(c.env.DB, 'owner_password_hash')) ?? c.env.OWNER_PASSWORD_HASH ?? '';
-  const role = body.username === adminUsername ? 'admin' : body.username === ownerUsername ? 'owner' : null;
-  const hash = role === 'admin' ? adminPasswordHash : role === 'owner' ? ownerPasswordHash : null;
+  const role = body.username === ownerUsername ? 'owner' : body.username === staffUsername || body.username === adminUsername ? 'admin' : null;
+  const hash =
+    body.username === ownerUsername
+      ? ownerPasswordHash
+      : body.username === staffUsername
+        ? staffPasswordHashFallback
+        : body.username === adminUsername
+          ? adminPasswordHash
+          : null;
   if (!role || !hash || !(await verifyPassword(body.password, hash))) {
     return c.json(
       { ok: false, error: { code: 'INVALID_CREDENTIALS', message: 'ユーザー名またはパスワードが違います。' } },

@@ -39,7 +39,7 @@ export function LoginPage() {
         </label>
         {error ? <p className="error">{error}</p> : null}
         <button type="submit">ログイン</button>
-        <p className="small">admin は /staff/register、owner は /admin に移動します。</p>
+        <p className="small">staff / admin は /staff/register、owner は /admin に移動します。</p>
       </form>
     </main>
   );
