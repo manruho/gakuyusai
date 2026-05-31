@@ -1,0 +1,184 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, system-ui, sans-serif;
+  background:
+    radial-gradient(circle at top, #fff7e8 0%, #f6efe5 36%, #efe6da 100%);
+  color: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 48px 20px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.hero,
+.panel,
+.product-card {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(120, 113, 108, 0.16);
+  box-shadow: 0 16px 40px rgba(120, 113, 108, 0.12);
+  backdrop-filter: blur(12px);
+}
+
+.hero {
+  border-radius: 28px;
+  padding: 28px;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  color: #a16207;
+}
+
+h1,
+h2 {
+  margin: 0;
+  line-height: 1.1;
+}
+
+h1 {
+  font-size: clamp(2.2rem, 6vw, 4.8rem);
+}
+
+.lede,
+.small,
+.error,
+.empty {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.error {
+  color: #b91c1c;
+  white-space: pre-line;
+}
+
+.cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.product-card,
+.panel {
+  border-radius: 20px;
+  padding: 20px;
+}
+
+.product-button {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.82);
+  color: inherit;
+}
+
+.summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.cart,
+.history,
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.cart-row,
+.history-row {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(120, 113, 108, 0.12);
+}
+
+.form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+textarea {
+  width: 100%;
+  min-height: 120px;
+  font: inherit;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 113, 108, 0.22);
+  padding: 0.85rem 1rem;
+}
+
+.price {
+  margin: 8px 0 12px;
+  font-weight: 700;
+}
+
+.status {
+  display: inline-flex;
+  margin: 0 0 8px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: #fef3c7;
+}
+
+.soldout {
+  margin: 0 0 8px;
+  color: #b45309;
+  font-weight: 700;
+}
+
+.page-form {
+  display: grid;
+  place-items: center;
+}
+
+.panel {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+}
+
+input,
+button {
+  font: inherit;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 113, 108, 0.22);
+  padding: 0.85rem 1rem;
+}
+
+button {
+  background: #1f2937;
+  color: white;
+  cursor: pointer;
+}

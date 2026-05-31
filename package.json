@@ -1,0 +1,48 @@
+{
+  "name": "gakuyusai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "cf:dev": "wrangler pages dev dist",
+    "cf:deploy": "npm run build && wrangler pages deploy dist --project-name gakuyusai",
+    "db:create": "wrangler d1 create gakuyusai",
+    "db:migration:create": "wrangler d1 migrations create gakuyusai",
+    "db:migrate:local": "wrangler d1 migrations apply gakuyusai --local",
+    "db:migrate:remote": "wrangler d1 migrations apply gakuyusai --remote",
+    "db:list": "wrangler d1 list",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "hono": "^4.12.23",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.16.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.15.0",
+    "@playwright/test": "^1.60.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^5.0.2",
+    "eslint": "^10.4.1",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.60.0",
+    "prettier": "^3.8.3",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.95.0"
+  }
+}

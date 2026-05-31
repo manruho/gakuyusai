@@ -1,0 +1,12 @@
+{
+  "name": "gakuyusai",
+  "compatibility_date": "2026-05-30",
+  "pages_build_output_dir": "dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gakuyusai",
+      "database_id": "1f791e5e-c06f-46a1-9838-02ce7ceb53bc"
+    }
+  ]
+}
