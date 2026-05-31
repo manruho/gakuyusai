@@ -209,38 +209,47 @@ export function AdminPage() {
           <div className="form-grid admin-form-grid">
             <label>
               staff username
+              <span className="field-help">スタッフ用のログイン名です。</span>
               <input value={settings.staff_username} onChange={(e) => setSettings((current) => ({ ...current, staff_username: e.target.value }))} />
             </label>
             <label>
               admin username
+              <span className="field-help">管理画面の受付用です。</span>
               <input value={settings.admin_username} onChange={(e) => setSettings((current) => ({ ...current, admin_username: e.target.value }))} />
             </label>
             <label>
               owner username
+              <span className="field-help">設定変更権限を持つログイン名です。</span>
               <input value={settings.owner_username} onChange={(e) => setSettings((current) => ({ ...current, owner_username: e.target.value }))} />
             </label>
             <label>
               staff password hash
+              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
               <textarea value={settings.staff_password_hash} onChange={(e) => setSettings((current) => ({ ...current, staff_password_hash: e.target.value }))} />
             </label>
             <label>
               admin password hash
+              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
               <textarea value={settings.admin_password_hash} onChange={(e) => setSettings((current) => ({ ...current, admin_password_hash: e.target.value }))} />
             </label>
             <label>
               owner password hash
+              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
               <textarea value={settings.owner_password_hash} onChange={(e) => setSettings((current) => ({ ...current, owner_password_hash: e.target.value }))} />
             </label>
             <label>
               しきい値 low
+              <span className="field-help">在庫表示の最小ラインです。</span>
               <input value={settings.threshold_low} onChange={(e) => setSettings((current) => ({ ...current, threshold_low: e.target.value }))} />
             </label>
             <label>
               しきい値 mid
+              <span className="field-help">中間ラインです。</span>
               <input value={settings.threshold_mid} onChange={(e) => setSettings((current) => ({ ...current, threshold_mid: e.target.value }))} />
             </label>
             <label>
               しきい値 high
+              <span className="field-help">十分ある状態のラインです。</span>
               <input value={settings.threshold_high} onChange={(e) => setSettings((current) => ({ ...current, threshold_high: e.target.value }))} />
             </label>
           </div>

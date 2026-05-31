@@ -219,6 +219,31 @@ h2 {
   opacity: 0.78;
 }
 
+.register-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.register-metrics div {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(120, 113, 108, 0.16);
+}
+
+.register-metrics span,
+.field-help {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.register-metrics strong {
+  font-size: 1.25rem;
+}
+
 .register-toolbar {
   justify-content: space-between;
   background: rgba(255, 255, 255, 0.62);
@@ -429,11 +454,17 @@ h2 {
 
 .admin-form-grid label {
   min-width: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .admin-form-grid input,
 .admin-form-grid textarea {
   min-width: 0;
+}
+
+.field-help {
+  line-height: 1.4;
 }
 
 .register-subtitle {
@@ -516,5 +547,9 @@ textarea {
 
   .register-actions {
     flex-direction: column-reverse;
+  }
+
+  .register-metrics {
+    grid-template-columns: 1fr;
   }
 }

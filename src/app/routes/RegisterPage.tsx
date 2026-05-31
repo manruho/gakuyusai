@@ -132,6 +132,20 @@ export function RegisterPage() {
             <small>{selectedCount}点 / {Object.values(selected).reduce((sum, qty) => sum + qty, 0)}個</small>
           </div>
         </header>
+        <div className="register-metrics">
+          <div>
+            <span>選択商品</span>
+            <strong>{selectedCount}</strong>
+          </div>
+          <div>
+            <span>選択個数</span>
+            <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)}</strong>
+          </div>
+          <div>
+            <span>現在の合計</span>
+            <strong>{formatYen(total)}</strong>
+          </div>
+        </div>
 
         <div className="toolbar register-toolbar">
           <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
