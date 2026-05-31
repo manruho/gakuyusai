@@ -215,10 +215,6 @@ export function RegisterPage() {
                           <span>{quantity}点</span>
                         </div>
                         <div className="cart-price">{formatYen(item.price * quantity)}</div>
-                        <div className="toolbar cart-actions">
-                          <button onClick={() => remove(id)}>−</button>
-                          <button onClick={() => add(id)}>＋</button>
-                        </div>
                       </div>
                     );
                   })
