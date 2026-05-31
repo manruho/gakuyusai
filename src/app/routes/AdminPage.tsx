@@ -188,16 +188,25 @@ export function AdminPage() {
       <section className="panel">
         <h1>管理画面</h1>
         {message ? <p className="error">{message}</p> : null}
-        <div className="toolbar">
-          <button onClick={() => togglePublic('public_status_enabled', 'true')}>公開ON</button>
-          <button onClick={() => togglePublic('public_status_enabled', 'false')}>公開OFF</button>
-          <button onClick={() => togglePublic('sales_open', 'true')}>販売ON</button>
-          <button onClick={loadCsv}>CSV取得</button>
-          <button onClick={loadSummary}>集計更新</button>
-        </div>
-        <section className="summary">
-          <h2>システム設定</h2>
-          <div className="form-grid">
+        <section className="admin-panel">
+          <div className="section-head">
+            <h2>運用設定</h2>
+            <p className="small">公開ON/OFF、販売ON/OFF、CSV、集計をここにまとめています。</p>
+          </div>
+          <div className="toolbar admin-primary-actions">
+            <button onClick={() => togglePublic('public_status_enabled', 'true')}>公開ON</button>
+            <button onClick={() => togglePublic('public_status_enabled', 'false')}>公開OFF</button>
+            <button onClick={() => togglePublic('sales_open', 'true')}>販売ON</button>
+            <button onClick={loadCsv}>CSV取得</button>
+            <button onClick={loadSummary}>集計更新</button>
+          </div>
+        </section>
+        <section className="admin-panel">
+          <div className="section-head">
+            <h2>システム設定</h2>
+            <p className="small">ログイン情報としきい値を変更します。保存は1回だけ押してください。</p>
+          </div>
+          <div className="form-grid admin-form-grid">
             <label>
               staff username
               <input value={settings.staff_username} onChange={(e) => setSettings((current) => ({ ...current, staff_username: e.target.value }))} />
@@ -235,52 +244,55 @@ export function AdminPage() {
               <input value={settings.threshold_high} onChange={(e) => setSettings((current) => ({ ...current, threshold_high: e.target.value }))} />
             </label>
           </div>
-          <div className="toolbar">
+          <div className="toolbar admin-primary-actions">
             <button onClick={saveSettings}>ログイン情報としきい値を保存</button>
           </div>
         </section>
         {summary ? (
-          <div className="summary">
+          <div className="summary admin-summary">
             <p>売上合計: {formatYen(summary.totalSales)}</p>
             <p>会計件数: {summary.completedSales}</p>
             <p>商品数: {summary.totalProducts}</p>
             <p>販売数: {summary.totalQuantity}</p>
           </div>
         ) : null}
-        <div className="cards">
-          {items.map((item) => (
-            <article
-              key={item.id}
-              className="product-card"
-              role="button"
-              tabIndex={0}
-              onClick={() =>
-                setForm({
-                  id: item.id,
-                  name: item.name,
-                  displayName: item.displayName,
-                  price: item.price,
-                  initialStock: item.initialStock ?? item.initial_stock ?? 0,
-                  isPublic: Boolean(item.isPublic ?? item.is_public),
-                  isActive: Boolean(item.isActive ?? item.is_active),
-                  sortOrder: item.sortOrder ?? item.sort_order ?? 0,
-                  allergyText: item.allergyText ?? item.allergy_text ?? '',
-                  description: item.description ?? '',
-                  note: item.note ?? '',
-                })
-              }
-            >
-              <h2>{item.displayName}</h2>
-              <p>{item.name}</p>
-              <p>{formatYen(item.price)}</p>
-              <p>初期在庫: {item.initialStock ?? item.initial_stock ?? '-'}</p>
-              <p>アレルギー: {item.allergyText ?? item.allergy_text ?? '-'}</p>
-              <p>備考: {item.note ?? '-'}</p>
-            </article>
-          ))}
-        </div>
-        <section className="summary">
-          <h2>商品編集</h2>
+        <section className="admin-panel">
+          <div className="section-head">
+            <h2>商品編集</h2>
+            <p className="small">一覧から選んで編集して、保存を押します。</p>
+          </div>
+          <div className="cards admin-product-cards">
+            {items.map((item) => (
+              <article
+                key={item.id}
+                className="product-card"
+                role="button"
+                tabIndex={0}
+                onClick={() =>
+                  setForm({
+                    id: item.id,
+                    name: item.name,
+                    displayName: item.displayName,
+                    price: item.price,
+                    initialStock: item.initialStock ?? item.initial_stock ?? 0,
+                    isPublic: Boolean(item.isPublic ?? item.is_public),
+                    isActive: Boolean(item.isActive ?? item.is_active),
+                    sortOrder: item.sortOrder ?? item.sort_order ?? 0,
+                    allergyText: item.allergyText ?? item.allergy_text ?? '',
+                    description: item.description ?? '',
+                    note: item.note ?? '',
+                  })
+                }
+              >
+                <h2>{item.displayName}</h2>
+                <p>{item.name}</p>
+                <p>{formatYen(item.price)}</p>
+                <p>初期在庫: {item.initialStock ?? item.initial_stock ?? '-'}</p>
+                <p>アレルギー: {item.allergyText ?? item.allergy_text ?? '-'}</p>
+                <p>備考: {item.note ?? '-'}</p>
+              </article>
+            ))}
+          </div>
           <div className="form-grid">
             <label>
               ID
@@ -319,7 +331,7 @@ export function AdminPage() {
               <textarea value={form.description} onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))} />
             </label>
           </div>
-          <div className="toolbar">
+          <div className="toolbar admin-primary-actions">
             <label>
               <input
                 type="checkbox"
@@ -341,24 +353,28 @@ export function AdminPage() {
             </button>
           </div>
         </section>
-        {csv ? (
-          <label>
-            CSVプレビュー
-            <textarea readOnly value={csv} rows={8} />
-          </label>
-        ) : null}
-        <div className="toolbar">
-          <button
-            onClick={() => void downloadCsv('/api/admin/export/sales.csv', 'sales.csv')}
-          >
-            売上CSV
-          </button>
-          <button
-            onClick={() => void downloadCsv('/api/admin/export/stock-events.csv', 'stock-events.csv')}
-          >
-            在庫イベントCSV
-          </button>
-        </div>
+        <section className="admin-panel">
+          <div className="section-head">
+            <h2>CSVプレビュー</h2>
+            <p className="small">出力前に中身を確認できます。</p>
+          </div>
+          {csv ? (
+            <label>
+              CSVプレビュー
+              <textarea readOnly value={csv} rows={8} />
+            </label>
+          ) : (
+            <p className="small">まだCSVを読み込んでいません。</p>
+          )}
+          <div className="toolbar admin-primary-actions">
+            <button onClick={() => void downloadCsv('/api/admin/export/sales.csv', 'sales.csv')}>
+              売上CSV
+            </button>
+            <button onClick={() => void downloadCsv('/api/admin/export/stock-events.csv', 'stock-events.csv')}>
+              在庫イベントCSV
+            </button>
+          </div>
+        </section>
       </section>
     </main>
   );
