@@ -229,29 +229,9 @@ h2 {
   opacity: 0.78;
 }
 
-.register-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.register-metrics div {
-  display: grid;
-  gap: 4px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: #fafafa;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-}
-
-.register-metrics span,
 .field-help {
   font-size: 0.78rem;
   color: #6b7280;
-}
-
-.register-metrics strong {
-  font-size: 1.32rem;
 }
 
 .register-toolbar {
@@ -390,6 +370,21 @@ h2 {
   padding: 14px;
   border-radius: 8px;
   background: #fafafa;
+}
+
+.payment-label {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: 0.02em;
+}
+
+.confirm-summary p {
+  align-items: center;
+}
+
+.confirm-summary p strong {
+  font-size: 1.35rem;
 }
 
 .payment-box input {
@@ -683,6 +678,10 @@ h2 {
   gap: 4px;
 }
 
+.receipt-inline {
+  padding-bottom: 10px;
+}
+
 .history-row span,
 .history-row small {
   color: #374151;
@@ -742,10 +741,6 @@ textarea {
 
   .register-actions {
     flex-direction: column-reverse;
-  }
-
-  .register-metrics {
-    grid-template-columns: 1fr;
   }
 
   .numpad button {

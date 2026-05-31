@@ -135,21 +135,6 @@ export function RegisterPage() {
           </div>
         </header>
 
-        <div className="register-metrics">
-          <div>
-            <span>選択商品</span>
-            <strong>{selectedCount}</strong>
-          </div>
-          <div>
-            <span>選択個数</span>
-            <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)}</strong>
-          </div>
-          <div>
-            <span>現在の合計</span>
-            <strong>{formatYen(total)}</strong>
-          </div>
-        </div>
-
         {message ? <p className="error register-message">{message}</p> : null}
 
         {phase === 'select' ? (
@@ -230,14 +215,33 @@ export function RegisterPage() {
               <div className="section-head">
                 <h2>会計</h2>
               </div>
+              <div className="receipt receipt-inline">
+                <div className="receipt-items">
+                  {Object.entries(selected).map(([id, quantity]) => {
+                    const item = items.find((entry) => entry.id === id);
+                    if (!item) return null;
+                    return (
+                      <div key={id} className="receipt-item">
+                        <div>
+                          <strong>{item.displayName}</strong>
+                          <span>
+                            {formatYen(item.price)} × {quantity}
+                          </span>
+                        </div>
+                        <strong>{formatYen(item.price * quantity)}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="confirm-summary">
-                <p><span>合計</span><strong>{formatYen(total)}</strong></p>
-                <p><span>預かり</span><strong>{formatYen(paidAmount)}</strong></p>
-                <p><span>おつり</span><strong>{formatYen(change)}</strong></p>
+                <p><span className="payment-label">合計</span><strong>{formatYen(total)}</strong></p>
+                <p><span className="payment-label">預かり</span><strong>{formatYen(paidAmount)}</strong></p>
+                <p><span className="payment-label">おつり</span><strong>{formatYen(change)}</strong></p>
               </div>
               <div className="payment-box">
                 <label>
-                  預かり金額
+                  <span className="payment-label">預かり金額</span>
                   <input type="text" inputMode="numeric" value={formatYen(paidAmount)} readOnly aria-label="預かり金額" />
                 </label>
                 <div className="numpad">
