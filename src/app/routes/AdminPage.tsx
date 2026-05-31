@@ -216,7 +216,18 @@ export function AdminPage() {
   return (
     <main className="page page-admin">
       <section className="panel">
-        <h1>管理画面</h1>
+        <div className="admin-hero">
+          <div>
+            <p className="eyebrow">Admin Console</p>
+            <h1>管理画面</h1>
+            <p className="small">販売履歴、商品管理、設定変更をまとめています。</p>
+          </div>
+          <div className="toolbar">
+            <a className="admin-link-button" href="/staff/register">
+              レジへ
+            </a>
+          </div>
+        </div>
         {message ? <p className="error">{message}</p> : null}
         <section className="admin-panel">
           <div className="section-head">

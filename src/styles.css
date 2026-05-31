@@ -289,10 +289,6 @@ h2 {
   top: 18px;
 }
 
-.register-history {
-  margin-top: 4px;
-}
-
 .section-head {
   display: grid;
   gap: 6px;
@@ -300,8 +296,7 @@ h2 {
 
 .register-products h2,
 .register-cart h2,
-.register-confirm h2,
-.register-history h2 {
+.register-confirm h2 {
   font-size: 1.05rem;
   color: #374151;
   letter-spacing: 0.02em;
@@ -484,6 +479,28 @@ h2 {
   border: 1px solid #dbe4ef;
   box-shadow: 0 12px 24px rgba(71, 85, 105, 0.12);
   backdrop-filter: none;
+}
+
+.admin-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #dbe4ef;
+}
+
+.admin-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  background: linear-gradient(180deg, #1d4ed8 0%, #2563eb 100%);
+  color: white;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.16);
 }
 
 .admin-panel {
