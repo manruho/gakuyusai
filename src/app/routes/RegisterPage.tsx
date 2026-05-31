@@ -192,7 +192,14 @@ export function RegisterPage() {
               </div>
               <div className="toolbar register-actions">
                 <button onClick={clear}>選択を空にする</button>
-                <button className="primary-action" onClick={() => setPhase('pay')} disabled={!selectedCount || total <= 0}>
+                <button
+                  className="primary-action"
+                  onClick={() => {
+                    setPaidAmount(0);
+                    setPhase('pay');
+                  }}
+                  disabled={!selectedCount || total <= 0}
+                >
                   会計へ進む
                 </button>
               </div>
@@ -295,7 +302,14 @@ export function RegisterPage() {
                 </div>
               </div>
               <div className="toolbar register-actions">
-                <button onClick={() => setPhase('select')}>商品選択へ戻る</button>
+                <button
+                  onClick={() => {
+                    setPaidAmount(0);
+                    setPhase('select');
+                  }}
+                >
+                  商品選択へ戻る
+                </button>
                 <button className="primary-action" onClick={confirm} disabled={!selectedCount || total <= 0}>
                   お会計確定
                 </button>
@@ -337,7 +351,16 @@ export function RegisterPage() {
               </div>
             ) : null}
             <div className="toolbar">
-              <button onClick={() => setPhase('select')}>次の会計へ</button>
+              <button
+                onClick={() => {
+                  clear();
+                  setPaidAmount(0);
+                  setSaleType('normal');
+                  setPhase('select');
+                }}
+              >
+                次の会計へ
+              </button>
               <button
                 onClick={() => {
                   clear();

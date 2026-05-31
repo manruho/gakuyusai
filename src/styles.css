@@ -512,11 +512,11 @@ h2 {
 }
 
 .confirm-summary p strong {
-  font-size: 4.8rem;
+  font-size: 3.8rem;
 }
 
 .summary-label {
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   color: #475569;
   letter-spacing: 0.08em;
 }
@@ -532,7 +532,7 @@ h2 {
 }
 
 .change {
-  font-size: clamp(3.4rem, 5vw, 6.2rem);
+  font-size: clamp(4.2rem, 6vw, 7.5rem);
   font-weight: 900;
   color: #111827;
   padding: 0.6rem 0.8rem;
@@ -803,6 +803,12 @@ h2 {
 .receipt-meta {
   display: grid;
   gap: 10px;
+}
+
+.receipt-meta span {
+  font-size: 1.4rem;
+  color: #64748b;
+  letter-spacing: 0.04em;
 }
 
 .receipt-meta p,
