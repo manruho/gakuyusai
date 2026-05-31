@@ -221,7 +221,7 @@ h2 {
 }
 
 .register-total strong {
-  font-size: clamp(2rem, 5vw, 3.8rem);
+  font-size: clamp(3.2rem, 8vw, 6.8rem);
   line-height: 1;
 }
 
@@ -250,13 +250,13 @@ h2 {
 .register-select,
 .register-pay {
   display: grid;
-  grid-template-columns: minmax(0, 2.3fr) minmax(340px, 0.9fr);
+  grid-template-columns: minmax(0, 2.45fr) minmax(420px, 1fr);
   gap: 16px;
   align-items: start;
 }
 
 .register-pay {
-  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.95fr);
+  grid-template-columns: minmax(0, 1.9fr) minmax(420px, 1fr);
 }
 
 .register-panel {
@@ -279,7 +279,7 @@ h2 {
 .register-products h2,
 .register-cart h2,
 .register-confirm h2 {
-  font-size: 1.05rem;
+  font-size: 1.5rem;
   color: #374151;
   letter-spacing: 0.02em;
 }
@@ -294,19 +294,19 @@ h2 {
   gap: 8px;
   text-align: left;
   color: inherit;
-  min-height: 90px;
-  padding: 16px 18px;
+  min-height: 120px;
+  padding: 20px 22px;
   border-radius: 6px;
   background: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
 }
 
 .product-row strong {
-  font-size: 1.25rem;
+  font-size: 1.8rem;
 }
 
 .product-row-price {
-  font-size: 1.45rem;
+  font-size: 2.4rem;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
@@ -320,18 +320,18 @@ h2 {
 }
 
 .product-count {
-  min-width: 5rem;
+  min-width: 7rem;
   text-align: center;
-  padding: 0.25rem 0.7rem;
+  padding: 0.35rem 0.85rem;
   border-radius: 6px;
   background: rgba(55, 65, 81, 0.08);
   color: #334155;
   font-weight: 900;
-  font-size: 1rem;
+  font-size: 1.35rem;
 }
 
 .product-row span {
-  font-size: 1.2rem;
+  font-size: 1.4rem;
   font-weight: 900;
 }
 
@@ -351,7 +351,7 @@ h2 {
 .history-row {
   display: grid;
   gap: 8px;
-  padding: 14px;
+  padding: 18px;
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.16);
@@ -366,19 +366,20 @@ h2 {
 
 .cart-price {
   font-weight: 800;
-  font-size: 1.05rem;
+  font-size: 1.9rem;
 }
 
 .cart-actions button {
-  min-width: 44px;
-  padding-inline: 0.75rem;
+  min-width: 56px;
+  padding-inline: 1rem;
+  font-size: 1.1rem;
 }
 
 .payment-box,
 .confirm-summary {
   display: grid;
   gap: 10px;
-  padding: 14px;
+  padding: 18px;
   border-radius: 8px;
   background: #fafafa;
 }
@@ -398,20 +399,20 @@ h2 {
 .register-detail-head div {
   display: grid;
   gap: 6px;
-  padding: 12px 14px;
+  padding: 16px 18px;
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .register-detail-head span {
-  font-size: 0.84rem;
+  font-size: 1.05rem;
   color: #64748b;
   letter-spacing: 0.02em;
 }
 
 .register-detail-head strong {
-  font-size: 1.7rem;
+  font-size: 3rem;
   line-height: 1.05;
 }
 
@@ -424,7 +425,7 @@ h2 {
 }
 
 .payment-label {
-  font-size: 1rem;
+  font-size: 1.45rem;
   font-weight: 800;
   color: #111827;
   letter-spacing: 0.02em;
@@ -435,11 +436,11 @@ h2 {
 }
 
 .confirm-summary p strong {
-  font-size: 1.5rem;
+  font-size: 3.6rem;
 }
 
 .payment-box input {
-  font-size: 1.4rem;
+  font-size: 3rem;
   font-weight: 800;
   text-align: right;
   letter-spacing: 0.04em;
@@ -449,7 +450,7 @@ h2 {
 }
 
 .change {
-  font-size: clamp(1.4rem, 2vw, 2rem);
+  font-size: clamp(2.8rem, 4vw, 5rem);
   font-weight: 900;
   color: #111827;
   padding: 0.6rem 0.8rem;
@@ -464,8 +465,8 @@ h2 {
 }
 
 .numpad button {
-  min-height: 60px;
-  font-size: 1.15rem;
+  min-height: 86px;
+  font-size: 1.8rem;
   font-weight: 800;
   border-radius: 6px;
   box-shadow: none;
@@ -476,7 +477,7 @@ h2 {
 }
 
 .register-confirm h2 {
-  font-size: 1.3rem;
+  font-size: 2.4rem;
 }
 
 .confirm-row,
@@ -659,7 +660,7 @@ h2 {
 }
 
 .register-summary strong {
-  font-size: 1.5rem;
+  font-size: 2.5rem;
 }
 
 .page-form .panel {
@@ -734,15 +735,15 @@ h2 {
 }
 
 .receipt-item-total {
-  font-size: 1.2rem;
+  font-size: 2.4rem;
 }
 
 .receipt-items .receipt-item strong {
-  font-size: 1.05rem;
+  font-size: 1.4rem;
 }
 
 .receipt-items .receipt-item span {
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: #475569;
 }
 
