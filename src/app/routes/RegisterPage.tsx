@@ -28,7 +28,7 @@ export function RegisterPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [saleQuery, setSaleQuery] = useState('');
   const [selected, setSelected] = useState<Record<string, number>>({});
-  const [paidAmount, setPaidAmount] = useState(1000);
+  const [paidAmount, setPaidAmount] = useState(0);
   const [saleType, setSaleType] = useState<'normal' | 'presale_pickup'>('normal');
   const [phase, setPhase] = useState<'select' | 'confirm' | 'complete'>('select');
   const [message, setMessage] = useState('');
@@ -75,6 +75,9 @@ export function RegisterPage() {
       return next;
     });
   const clear = () => setSelected({});
+  const clearPaidAmount = () => setPaidAmount(0);
+  const appendPaidDigit = (digit: number) => setPaidAmount((current) => current * 10 + digit);
+  const backspacePaidAmount = () => setPaidAmount((current) => Math.floor(current / 10));
 
   const cancelSale = async (saleId: string) => {
     if (!window.confirm('この販売を取り消しますか？')) {
@@ -148,12 +151,6 @@ export function RegisterPage() {
         </div>
 
         <div className="toolbar register-toolbar">
-          <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
-            通常販売
-          </button>
-          <button onClick={() => setSaleType('presale_pickup')} aria-pressed={saleType === 'presale_pickup'}>
-            事前販売
-          </button>
           <button onClick={() => void load()}>在庫を再読み込み</button>
         </div>
 
@@ -216,9 +213,28 @@ export function RegisterPage() {
               <div className="payment-box">
                 <label>
                   預かり金額
-                  <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Number(e.target.value))} />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={formatYen(paidAmount)}
+                    readOnly
+                    aria-label="預かり金額"
+                  />
                 </label>
                 <p className="change">おつり {formatYen(change)}</p>
+                <div className="numpad">
+                  <button onClick={clearPaidAmount}>C</button>
+                  <button onClick={backspacePaidAmount}>⌫</button>
+                  <button onClick={() => setPaidAmount((current) => current * 100)}>00</button>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
+                    <button key={digit} onClick={() => appendPaidDigit(digit)}>
+                      {digit}
+                    </button>
+                  ))}
+                  <button className="numpad-zero" onClick={() => appendPaidDigit(0)}>
+                    0
+                  </button>
+                </div>
               </div>
               <div className="toolbar register-actions">
                 <button onClick={clear}>カートを空にする</button>
@@ -309,6 +325,23 @@ export function RegisterPage() {
               <p>販売履歴はまだありません。</p>
             )}
           </div>
+        </section>
+
+        <section className="register-panel register-advanced">
+          <details>
+            <summary>販売種別と運用操作</summary>
+            <div className="register-advanced-body">
+              <div className="toolbar register-sale-type">
+                <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
+                  通常販売
+                </button>
+                <button onClick={() => setSaleType('presale_pickup')} aria-pressed={saleType === 'presale_pickup'}>
+                  事前販売
+                </button>
+              </div>
+              <p className="small">販売種別はここにまとめてあります。普段の操作では上部の選択に迷わないよう、下の方に置いています。</p>
+            </div>
+          </details>
         </section>
       </section>
     </main>

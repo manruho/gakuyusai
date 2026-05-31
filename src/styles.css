@@ -390,9 +390,32 @@ h2 {
   background: rgba(243, 244, 246, 0.9);
 }
 
+.payment-box input {
+  font-size: 1.4rem;
+  font-weight: 800;
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+
 .change {
   font-size: 1.25rem;
   font-weight: 800;
+}
+
+.numpad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.numpad button {
+  min-height: 56px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.numpad-zero {
+  grid-column: 1 / span 3;
 }
 
 .register-confirm h2 {
@@ -478,6 +501,36 @@ h2 {
   color: rgba(255, 255, 255, 0.72);
 }
 
+.register-advanced {
+  padding: 0;
+  overflow: hidden;
+}
+
+.register-advanced details {
+  padding: 0;
+}
+
+.register-advanced summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 18px 20px;
+  font-weight: 700;
+}
+
+.register-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.register-advanced-body {
+  padding: 0 20px 20px;
+  display: grid;
+  gap: 10px;
+}
+
+.register-sale-type button {
+  flex: 1 1 180px;
+}
+
 .page-form .panel {
   width: min(420px, 100%);
 }
@@ -557,5 +610,9 @@ textarea {
 
   .register-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .numpad button {
+    min-height: 48px;
   }
 }
