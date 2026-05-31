@@ -115,10 +115,19 @@ export function RegisterPage() {
   };
 
   return (
-    <main className="page">
-      <section className="panel">
-        <h1>レジ</h1>
-        <div className="toolbar">
+    <main className="page page-register">
+      <section className="register-shell">
+        <header className="register-hero">
+          <div>
+            <p className="eyebrow">Register Desk</p>
+            <h1>レジ</h1>
+          </div>
+          <div className="register-total">
+            <span>合計</span>
+            <strong>{formatYen(total)}</strong>
+          </div>
+        </header>
+        <div className="toolbar register-toolbar">
           <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
             通常販売
           </button>
@@ -127,25 +136,28 @@ export function RegisterPage() {
           </button>
           <button onClick={() => void load()}>在庫を再読み込み</button>
         </div>
-        {message ? <p className="error">{message}</p> : null}
+        {message ? <p className="error register-message">{message}</p> : null}
         {phase === 'select' ? (
-          <>
-            <div className="cards">
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  className="product-button"
-                  disabled={!item.isActive || item.isSoldOut}
-                  onClick={() => add(item.id)}
-                >
-                  <strong>{item.displayName}</strong>
-                  <span>{formatYen(item.price)}</span>
-                  <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
-                </button>
-              ))}
+          <section className="register-grid">
+            <div className="register-panel register-products">
+              <h2>商品を選ぶ</h2>
+              <div className="cards register-cards">
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    className="product-button"
+                    disabled={!item.isActive || item.isSoldOut}
+                    onClick={() => add(item.id)}
+                  >
+                    <strong>{item.displayName}</strong>
+                    <span className="product-price">{formatYen(item.price)}</span>
+                    <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
+                  </button>
+                ))}
+              </div>
             </div>
-            <section className="summary">
-              <p>合計: {formatYen(total)}</p>
+            <aside className="register-panel register-cart">
+              <h2>カート</h2>
               <div className="cart">
                 {Object.keys(selected).length ? (
                   Object.entries(selected).map(([id, quantity]) => {
@@ -153,13 +165,14 @@ export function RegisterPage() {
                     if (!item) return null;
                     return (
                       <div key={id} className="cart-row">
-                        <span>
-                          {item.displayName} × {quantity}
-                        </span>
-                        <span>{formatYen(item.price * quantity)}</span>
-                        <div className="toolbar">
-                          <button onClick={() => remove(id)}>1つ減らす</button>
-                          <button onClick={() => add(id)}>1つ増やす</button>
+                        <div className="cart-main">
+                          <strong>{item.displayName}</strong>
+                          <span>{formatYen(item.price)} × {quantity}</span>
+                        </div>
+                        <div className="cart-price">{formatYen(item.price * quantity)}</div>
+                        <div className="toolbar cart-actions">
+                          <button onClick={() => remove(id)}>−</button>
+                          <button onClick={() => add(id)}>＋</button>
                         </div>
                       </div>
                     );
@@ -168,40 +181,45 @@ export function RegisterPage() {
                   <p>カートは空です。</p>
                 )}
               </div>
-              <label>
-                預かり金額
-                <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Number(e.target.value))} />
-              </label>
-              <p>おつり: {formatYen(change)}</p>
-              <div className="toolbar">
+              <div className="payment-box">
+                <label>
+                  預かり金額
+                  <input type="number" value={paidAmount} onChange={(e) => setPaidAmount(Number(e.target.value))} />
+                </label>
+                <p className="change">おつり {formatYen(change)}</p>
+              </div>
+              <div className="toolbar register-actions">
                 <button onClick={clear}>カートを空にする</button>
                 <button onClick={() => setPhase('confirm')} disabled={!Object.keys(selected).length || total <= 0}>
                   確認へ進む
                 </button>
               </div>
-            </section>
-          </>
+            </aside>
+          </section>
         ) : phase === 'confirm' ? (
-          <section className="summary">
+          <section className="register-panel register-confirm">
             <h2>{saleType === 'presale_pickup' ? 'この内容で事前販売分の受け渡しを確定しますか？' : 'これでお会計を確定していいですか？'}</h2>
             {Object.entries(selected).map(([id, quantity]) => {
               const item = items.find((entry) => entry.id === id);
               return item ? (
-                <p key={id}>
-                  {item.displayName} × {quantity} {formatYen(item.price * quantity)}
+                <p key={id} className="confirm-row">
+                  <span>{item.displayName} × {quantity}</span>
+                  <strong>{formatYen(item.price * quantity)}</strong>
                 </p>
               ) : null;
             })}
-            <p>合計 {formatYen(total)}</p>
-            <p>預かり {formatYen(paidAmount)}</p>
-            <p>おつり {formatYen(change)}</p>
+            <div className="confirm-summary">
+              <p><span>合計</span><strong>{formatYen(total)}</strong></p>
+              <p><span>預かり</span><strong>{formatYen(paidAmount)}</strong></p>
+              <p><span>おつり</span><strong>{formatYen(change)}</strong></p>
+            </div>
             <div className="toolbar">
               <button onClick={() => setPhase('select')}>戻って修正</button>
               <button onClick={confirm}>お会計確定</button>
             </div>
           </section>
         ) : (
-          <section className="summary">
+          <section className="register-panel register-complete">
             <h2>会計が完了しました</h2>
             <p>{message}</p>
             <div className="toolbar">
@@ -218,7 +236,7 @@ export function RegisterPage() {
             </div>
           </section>
         )}
-        <section className="summary">
+        <section className="register-panel register-history">
           <h2>販売履歴</h2>
           <label>
             検索

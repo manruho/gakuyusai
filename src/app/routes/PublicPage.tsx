@@ -47,6 +47,7 @@ export function PublicPage() {
         <p className="eyebrow">Public Status</p>
         <h1>{data.shopName}</h1>
         <p className="lede">最終更新: {formatDateTime(data.updatedAt)}</p>
+        <p className="small">商品名と在庫の状態だけをシンプルに表示します。</p>
         {error ? <p className="error">{error}</p> : null}
         {!data.isPublicEnabled ? <p className="soldout">公開ページは現在停止中です。</p> : null}
       </header>
@@ -58,7 +59,6 @@ export function PublicPage() {
             <p className={`status status-${item.statusLevel}`}>{item.statusText}</p>
             {item.isSoldOut ? <p className="soldout">売り切れ</p> : null}
             <p className="small">{item.allergyText || 'アレルギー表示なし'}</p>
-            <p className="small">{item.note}</p>
           </article>
         ))}
         {!data.items.length ? <p className="empty">公開中の商品はありません。</p> : null}
