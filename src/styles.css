@@ -267,9 +267,10 @@ h2 {
   border-radius: 16px;
 }
 
-.register-grid {
+.register-select,
+.register-pay {
   display: grid;
-  grid-template-columns: minmax(0, 2.05fr) minmax(340px, 0.95fr);
+  grid-template-columns: minmax(0, 2.3fr) minmax(340px, 0.9fr);
   gap: 16px;
   align-items: start;
 }
@@ -304,48 +305,49 @@ h2 {
   letter-spacing: 0.02em;
 }
 
-.register-cards {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
+.product-list {
+  display: grid;
+  gap: 12px;
 }
 
-.product-button {
+.product-row {
   display: grid;
   gap: 8px;
   text-align: left;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(249, 250, 251, 0.98));
   color: inherit;
-  min-height: 148px;
-  padding: 18px;
-  border-radius: 20px;
+  min-height: 90px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 250, 251, 0.99));
   box-shadow:
     inset 0 0 0 1px rgba(120, 113, 108, 0.08),
     0 8px 18px rgba(120, 113, 108, 0.08);
 }
 
-.product-button strong {
-  font-size: 1.28rem;
+.product-row strong {
+  font-size: 1.25rem;
 }
 
-.product-head {
+.product-row-main,
+.product-row-meta {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .product-count {
-  min-width: 2rem;
+  min-width: 2.5rem;
   text-align: center;
-  padding: 0.24rem 0.6rem;
+  padding: 0.18rem 0.5rem;
   border-radius: 999px;
-  background: rgba(31, 41, 55, 0.12);
+  background: rgba(31, 41, 55, 0.1);
   color: #111827;
   font-weight: 900;
 }
 
-.product-price {
-  font-size: 1.35rem;
+.product-row span {
+  font-size: 1.2rem;
   font-weight: 900;
 }
 
@@ -570,6 +572,30 @@ h2 {
   background: rgba(255, 255, 255, 0.9);
 }
 
+.register-summary {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.register-summary div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.register-summary span {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.register-summary strong {
+  font-size: 1.5rem;
+}
+
 .page-form .panel {
   width: min(420px, 100%);
 }
@@ -605,7 +631,8 @@ textarea {
 }
 
 @media (max-width: 1080px) {
-  .register-grid {
+  .register-select,
+  .register-pay {
     grid-template-columns: 1fr;
   }
 
