@@ -10,57 +10,47 @@ type Product = {
   isActive: boolean;
 };
 
-type Sale = {
+type ReceiptItem = {
   id: string;
-  sale_type: 'normal' | 'presale_pickup';
-  total_amount: number;
-  paid_amount: number;
-  change_amount: number;
-  payment_method: 'cash' | 'prepaid';
-  status: 'completed' | 'canceled';
-  created_at: string;
-  canceled_at: string | null;
-  items: Array<{ product_id: string; quantity: number; unit_price: number; subtotal: number }>;
+  displayName: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
 };
 
 export function RegisterPage() {
   const [items, setItems] = useState<Product[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [saleQuery, setSaleQuery] = useState('');
   const [selected, setSelected] = useState<Record<string, number>>({});
   const [paidAmount, setPaidAmount] = useState(0);
   const [saleType, setSaleType] = useState<'normal' | 'presale_pickup'>('normal');
   const [phase, setPhase] = useState<'select' | 'pay' | 'complete'>('select');
   const [message, setMessage] = useState('');
+  const [role, setRole] = useState<'admin' | 'owner' | null>(null);
+  const [receipt, setReceipt] = useState<{ saleId: string; items: ReceiptItem[]; totalAmount: number; paidAmount: number; changeAmount: number } | null>(null);
   const total = useMemo(
     () => items.reduce((sum, item) => sum + (selected[item.id] ?? 0) * item.price, 0),
     [items, selected],
   );
   const change = Math.max(0, paidAmount - total);
 
-  const load = async (query = '') => {
-    const searchParams = query ? `?q=${encodeURIComponent(query)}` : '';
-    const [productsResponse, salesResponse] = await Promise.all([
-      fetch('/api/staff/register/products'),
-      fetch(`/api/admin/sales${searchParams}`),
-    ]);
+  const load = async () => {
+    const productsResponse = await fetch('/api/staff/register/products');
     const productsJson = (await productsResponse.json()) as { ok: true; data: { items: Product[] } } | { ok: false; error: { message: string } };
-    const salesJson = (await salesResponse.json()) as { ok: true; data: { items: Sale[] } } | { ok: false; error: { message: string } };
     if (productsJson.ok) setItems(productsJson.data.items);
-    if (salesJson.ok) setSales(salesJson.data.items);
     if (!productsJson.ok) setMessage(productsJson.error.message);
   };
 
   useEffect(() => {
     void load();
+    void fetch('/api/auth/me')
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as { ok: true; data: { role: 'admin' | 'owner' } } | { ok: false };
+      })
+      .then((json) => {
+        if (json && json.ok) setRole(json.data.role);
+      });
   }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load(saleQuery.trim());
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [saleQuery]);
 
   const add = (id: string) => setSelected((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
   const remove = (id: string) =>
@@ -79,19 +69,20 @@ export function RegisterPage() {
   const appendPaidDigit = (digit: number) => setPaidAmount((current) => current * 10 + digit);
   const backspacePaidAmount = () => setPaidAmount((current) => Math.floor(current / 10));
 
-  const cancelSale = async (saleId: string) => {
-    if (!window.confirm('この販売を取り消しますか？')) return;
-    const response = await fetch(`/api/sales/${encodeURIComponent(saleId)}/cancel`, { method: 'POST' });
-    const json = (await response.json()) as { ok: true } | { ok: false; error: { message: string } };
-    if (!json.ok) {
-      setMessage(json.error.message);
-      return;
-    }
-    setMessage('販売を取り消しました');
-    void load();
-  };
-
   const confirm = async () => {
+    const selectedItems = Object.entries(selected).flatMap(([productId, quantity]) => {
+      const product = items.find((entry) => entry.id === productId);
+      if (!product || quantity <= 0) return [];
+      return [
+        {
+          id: product.id,
+          displayName: product.displayName,
+          quantity,
+          unitPrice: product.price,
+          subtotal: product.price * quantity,
+        },
+      ];
+    });
     const response = await fetch('/api/staff/register/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -110,7 +101,14 @@ export function RegisterPage() {
       setMessage(json.error.message);
       return;
     }
-    setMessage(`会計が完了しました: ${json.data.saleId}`);
+    setReceipt({
+      saleId: json.data.saleId,
+      items: selectedItems,
+      totalAmount: json.data.totalAmount,
+      paidAmount: json.data.paidAmount,
+      changeAmount: json.data.changeAmount,
+    });
+    setMessage('');
     setPhase('complete');
     clear();
     void load();
@@ -125,6 +123,11 @@ export function RegisterPage() {
           <div>
             <p className="eyebrow">Register Desk</p>
             <h1>レジ</h1>
+            {role === 'admin' ? (
+              <p className="register-subtitle">
+                <a href="/admin">販売履歴と設定へ</a>
+              </p>
+            ) : null}
           </div>
           <div className="register-total">
             <span>現在の合計</span>
@@ -237,7 +240,6 @@ export function RegisterPage() {
                   預かり金額
                   <input type="text" inputMode="numeric" value={formatYen(paidAmount)} readOnly aria-label="預かり金額" />
                 </label>
-                <p className="small">テンキーで入力します。はじめは 0 円です。</p>
                 <div className="numpad">
                   <button onClick={clearPaidAmount}>C</button>
                   <button onClick={backspacePaidAmount}>⌫</button>
@@ -263,7 +265,37 @@ export function RegisterPage() {
         ) : (
           <section className="register-panel register-complete">
             <h2>会計が完了しました</h2>
-            <p>{message}</p>
+            {receipt ? (
+              <div className="receipt">
+                <div className="receipt-meta">
+                  <p>
+                    <span>合計</span>
+                    <strong>{formatYen(receipt.totalAmount)}</strong>
+                  </p>
+                  <p>
+                    <span>預かり</span>
+                    <strong>{formatYen(receipt.paidAmount)}</strong>
+                  </p>
+                  <p>
+                    <span>おつり</span>
+                    <strong>{formatYen(receipt.changeAmount)}</strong>
+                  </p>
+                </div>
+                <div className="receipt-items">
+                  {receipt.items.map((item) => (
+                    <div key={item.id} className="receipt-item">
+                      <div>
+                        <strong>{item.displayName}</strong>
+                        <span>
+                          {formatYen(item.unitPrice)} × {item.quantity}
+                        </span>
+                      </div>
+                      <strong>{formatYen(item.subtotal)}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="toolbar">
               <button onClick={() => setPhase('select')}>次の会計へ</button>
               <button
@@ -278,35 +310,6 @@ export function RegisterPage() {
             </div>
           </section>
         )}
-
-        <section className="register-panel register-history">
-          <div className="section-head">
-            <h2>販売履歴</h2>
-          </div>
-          <label>
-            検索
-            <input value={saleQuery} onChange={(e) => setSaleQuery(e.target.value)} placeholder="sale id / type / status / product" />
-          </label>
-          <div className="history">
-            {sales.length ? (
-              sales.map((sale) => (
-                <div key={sale.id} className="history-row">
-                  <strong>
-                    {sale.sale_type} / {sale.status}
-                  </strong>
-                  <span>{formatYen(sale.total_amount)} / {sale.created_at}</span>
-                  <div className="toolbar">
-                    <button onClick={() => cancelSale(sale.id)} disabled={sale.status === 'canceled'}>
-                      取消
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p>販売履歴はまだありません。</p>
-            )}
-          </div>
-        </section>
 
         <section className="register-panel register-advanced">
           <details>

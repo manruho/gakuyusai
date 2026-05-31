@@ -48,6 +48,19 @@ type EditForm = {
   note: string;
 };
 
+type Sale = {
+  id: string;
+  sale_type: 'normal' | 'presale_pickup';
+  total_amount: number;
+  paid_amount: number;
+  change_amount: number;
+  payment_method: 'cash' | 'prepaid';
+  status: 'completed' | 'canceled';
+  created_at: string;
+  canceled_at: string | null;
+  items: Array<{ product_id: string; quantity: number; unit_price: number; subtotal: number }>;
+};
+
 const emptyForm: EditForm = {
   id: '',
   name: '',
@@ -80,6 +93,8 @@ export function AdminPage() {
   const [items, setItems] = useState<Product[]>([]);
   const [message, setMessage] = useState('');
   const [csv, setCsv] = useState('');
+  const [saleQuery, setSaleQuery] = useState('');
+  const [sales, setSales] = useState<Sale[]>([]);
   const [summary, setSummary] = useState<{ totalSales: number; completedSales: number; totalProducts: number; totalQuantity: number } | null>(null);
   const [form, setForm] = useState<EditForm>(emptyForm);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
@@ -119,11 +134,26 @@ export function AdminPage() {
     }
   };
 
+  const loadSales = async (query = '') => {
+    const search = query ? `?q=${encodeURIComponent(query)}&limit=50` : '?limit=50';
+    const response = await fetch(`/api/admin/sales${search}`);
+    const json = (await response.json()) as { ok: true; data: { items: Sale[] } } | { ok: false; error: { message: string } };
+    if (json.ok) setSales(json.data.items);
+  };
+
   useEffect(() => {
     void load();
     void loadSummary();
     void loadSettings();
+    void loadSales();
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadSales(saleQuery.trim());
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [saleQuery]);
 
   const togglePublic = async (key: string, value: string) => {
     const response = await fetch('/api/admin/settings', {
@@ -184,7 +214,7 @@ export function AdminPage() {
   };
 
   return (
-    <main className="page">
+    <main className="page page-admin">
       <section className="panel">
         <h1>管理画面</h1>
         {message ? <p className="error">{message}</p> : null}
@@ -265,6 +295,40 @@ export function AdminPage() {
             <p>販売数: {summary.totalQuantity}</p>
           </div>
         ) : null}
+        <section className="admin-panel admin-history-panel">
+          <div className="section-head">
+            <h2>販売履歴</h2>
+            <p className="small">admin / owner だけが見られる履歴です。</p>
+          </div>
+          <label>
+            検索
+            <input value={saleQuery} onChange={(e) => setSaleQuery(e.target.value)} placeholder="sale id / type / status / product" />
+          </label>
+          <div className="history admin-history">
+            {sales.length ? (
+              sales.map((sale) => (
+                <div key={sale.id} className="history-row admin-history-row">
+                  <div className="history-row-main">
+                    <strong>
+                      {sale.sale_type} / {sale.status}
+                    </strong>
+                    <span>
+                      {formatYen(sale.total_amount)} / {sale.created_at}
+                    </span>
+                  </div>
+                  <div className="history-row-meta">
+                    <small>
+                      預かり {formatYen(sale.paid_amount)} / おつり {formatYen(sale.change_amount)}
+                    </small>
+                    <small>{sale.items.length} 点</small>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="empty">販売履歴はまだありません。</p>
+            )}
+          </div>
+        </section>
         <section className="admin-panel">
           <div className="section-head">
             <h2>商品編集</h2>
