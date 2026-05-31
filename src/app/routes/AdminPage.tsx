@@ -90,6 +90,7 @@ const defaultSettings: Settings = {
 };
 
 export function AdminPage() {
+  const [viewer, setViewer] = useState<{ username: string; role: 'admin' | 'owner' } | null>(null);
   const [items, setItems] = useState<Product[]>([]);
   const [message, setMessage] = useState('');
   const [csv, setCsv] = useState('');
@@ -142,11 +143,33 @@ export function AdminPage() {
   };
 
   useEffect(() => {
+    void fetch('/api/auth/me')
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as { ok: true; data: { username: string; role: 'admin' | 'owner' } } | { ok: false };
+      })
+      .then((json) => {
+        if (json && json.ok) setViewer(json.data);
+      });
     void load();
     void loadSummary();
     void loadSettings();
     void loadSales();
   }, []);
+
+  if (viewer && viewer.username === 'staff') {
+    return (
+      <main className="page page-admin">
+        <section className="panel admin-denied">
+          <h1>アクセスできません</h1>
+          <p className="small">販売履歴と設定は admin / owner だけが見られます。</p>
+          <a className="admin-link-button" href="/staff/register">
+            レジへ戻る
+          </a>
+        </section>
+      </main>
+    );
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -309,7 +332,7 @@ export function AdminPage() {
         <section className="admin-panel admin-history-panel">
           <div className="section-head">
             <h2>販売履歴</h2>
-            <p className="small">admin / owner だけが見られる履歴です。</p>
+            <p className="small">販売履歴は admin / owner だけが見られます。</p>
           </div>
           <label>
             検索

@@ -22,7 +22,7 @@ export function LoginPage() {
       setError(json.error.message);
       return;
     }
-    navigate('/admin', { replace: true });
+    navigate(username === 'staff' ? '/staff/register' : '/admin', { replace: true });
   };
 
   return (
@@ -39,7 +39,7 @@ export function LoginPage() {
         </label>
         {error ? <p className="error">{error}</p> : null}
         <button type="submit">ログイン</button>
-        <p className="small">admin / owner は /admin に移動します。</p>
+        <p className="small">staff はレジへ、admin / owner は管理画面へ移動します。</p>
       </form>
     </main>
   );
