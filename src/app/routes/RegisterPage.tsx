@@ -185,7 +185,6 @@ export function RegisterPage() {
                       </div>
                     </div>
                     <div className="product-row-meta">
-                      <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
                       <span className="product-count">{selected[item.id] ?? 0} 点</span>
                     </div>
                   </button>
@@ -193,7 +192,7 @@ export function RegisterPage() {
               </div>
               <div className="toolbar register-actions">
                 <button onClick={clear}>選択を空にする</button>
-                <button onClick={() => setPhase('pay')} disabled={!selectedCount || total <= 0}>
+                <button className="primary-action" onClick={() => setPhase('pay')} disabled={!selectedCount || total <= 0}>
                   会計へ進む
                 </button>
               </div>
@@ -224,11 +223,11 @@ export function RegisterPage() {
               </div>
               <div className="register-summary">
                 <div>
-                  <span>合計</span>
+                  <span className="summary-label">合計</span>
                   <strong>{formatYen(total)}</strong>
                 </div>
                 <div>
-                  <span>個数</span>
+                  <span className="summary-label">個数</span>
                   <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)}</strong>
                 </div>
               </div>
@@ -297,7 +296,7 @@ export function RegisterPage() {
               </div>
               <div className="toolbar register-actions">
                 <button onClick={() => setPhase('select')}>商品選択へ戻る</button>
-                <button onClick={confirm} disabled={!selectedCount || total <= 0}>
+                <button className="primary-action" onClick={confirm} disabled={!selectedCount || total <= 0}>
                   お会計確定
                 </button>
               </div>

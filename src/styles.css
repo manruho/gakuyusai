@@ -390,14 +390,14 @@ h2 {
 }
 
 .product-count {
-  min-width: 7rem;
+  min-width: 8.5rem;
   text-align: center;
-  padding: 0.35rem 0.85rem;
+  padding: 0.45rem 1rem;
   border-radius: 6px;
-  background: rgba(79, 70, 229, 0.08);
+  background: rgba(79, 70, 229, 0.1);
   color: #312e81;
   font-weight: 900;
-  font-size: 1.35rem;
+  font-size: 1.8rem;
 }
 
 .product-row span {
@@ -515,6 +515,12 @@ h2 {
   font-size: 4.8rem;
 }
 
+.summary-label {
+  font-size: 1.2rem;
+  color: #475569;
+  letter-spacing: 0.08em;
+}
+
 .payment-box input {
   font-size: 3.4rem;
   font-weight: 800;
@@ -554,6 +560,17 @@ h2 {
 
 .register-confirm h2 {
   font-size: 2.8rem;
+}
+
+.primary-action {
+  background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
+  border-color: rgba(153, 27, 27, 0.45);
+  font-size: 1.45rem;
+  font-weight: 900;
+}
+
+.primary-action:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
 }
 
 .confirm-row,
@@ -732,7 +749,7 @@ h2 {
 
 .register-summary span {
   color: #6b7280;
-  font-size: 0.85rem;
+  font-size: 1.2rem;
 }
 
 .register-summary strong {
