@@ -37,6 +37,7 @@ export function RegisterPage() {
     [items, selected],
   );
   const change = Math.max(0, paidAmount - total);
+
   const load = async (query = '') => {
     const searchParams = query ? `?q=${encodeURIComponent(query)}` : '';
     const [productsResponse, salesResponse] = await Promise.all([
@@ -114,6 +115,8 @@ export function RegisterPage() {
     void load();
   };
 
+  const selectedCount = Object.keys(selected).length;
+
   return (
     <main className="page page-register">
       <section className="register-shell">
@@ -121,12 +124,15 @@ export function RegisterPage() {
           <div>
             <p className="eyebrow">Register Desk</p>
             <h1>レジ</h1>
+            <p className="small register-subtitle">商品名・値段・合計を大きく見せて、会計ミスを減らす画面です。</p>
           </div>
           <div className="register-total">
-            <span>合計</span>
+            <span>現在の合計</span>
             <strong>{formatYen(total)}</strong>
+            <small>{selectedCount}点 / {Object.values(selected).reduce((sum, qty) => sum + qty, 0)}個</small>
           </div>
         </header>
+
         <div className="toolbar register-toolbar">
           <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
             通常販売
@@ -136,11 +142,16 @@ export function RegisterPage() {
           </button>
           <button onClick={() => void load()}>在庫を再読み込み</button>
         </div>
+
         {message ? <p className="error register-message">{message}</p> : null}
+
         {phase === 'select' ? (
           <section className="register-grid">
             <div className="register-panel register-products">
-              <h2>商品を選ぶ</h2>
+              <div className="section-head">
+                <h2>商品を選ぶ</h2>
+                <p className="small">商品名と価格を見ながら、ボタンを押すだけで追加できます。</p>
+              </div>
               <div className="cards register-cards">
                 {items.map((item) => (
                   <button
@@ -149,17 +160,24 @@ export function RegisterPage() {
                     disabled={!item.isActive || item.isSoldOut}
                     onClick={() => add(item.id)}
                   >
-                    <strong>{item.displayName}</strong>
+                    <div className="product-head">
+                      <strong>{item.displayName}</strong>
+                      <span className="product-count">{selected[item.id] ?? 0}</span>
+                    </div>
                     <span className="product-price">{formatYen(item.price)}</span>
                     <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
                   </button>
                 ))}
               </div>
             </div>
+
             <aside className="register-panel register-cart">
-              <h2>カート</h2>
+              <div className="section-head">
+                <h2>カート</h2>
+                <p className="small">合計とおつりをここで常に確認できます。</p>
+              </div>
               <div className="cart">
-                {Object.keys(selected).length ? (
+                {selectedCount ? (
                   Object.entries(selected).map(([id, quantity]) => {
                     const item = items.find((entry) => entry.id === id);
                     if (!item) return null;
@@ -190,7 +208,7 @@ export function RegisterPage() {
               </div>
               <div className="toolbar register-actions">
                 <button onClick={clear}>カートを空にする</button>
-                <button onClick={() => setPhase('confirm')} disabled={!Object.keys(selected).length || total <= 0}>
+                <button onClick={() => setPhase('confirm')} disabled={!selectedCount || total <= 0}>
                   確認へ進む
                 </button>
               </div>
@@ -236,8 +254,12 @@ export function RegisterPage() {
             </div>
           </section>
         )}
+
         <section className="register-panel register-history">
-          <h2>販売履歴</h2>
+          <div className="section-head">
+            <h2>販売履歴</h2>
+            <p className="small">取消が必要な会計をすぐ見つけられます。</p>
+          </div>
           <label>
             検索
             <input

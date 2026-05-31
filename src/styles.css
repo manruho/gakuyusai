@@ -242,6 +242,20 @@ h2 {
   gap: 16px;
 }
 
+.register-cart {
+  position: sticky;
+  top: 18px;
+}
+
+.register-history {
+  margin-top: 4px;
+}
+
+.section-head {
+  display: grid;
+  gap: 6px;
+}
+
 .register-products h2,
 .register-cart h2,
 .register-confirm h2,
@@ -269,6 +283,23 @@ h2 {
 
 .product-button strong {
   font-size: 1.2rem;
+}
+
+.product-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.product-count {
+  min-width: 2rem;
+  text-align: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(31, 41, 55, 0.08);
+  color: #111827;
+  font-weight: 800;
 }
 
 .product-price {
@@ -358,10 +389,6 @@ h2 {
   justify-content: space-between;
 }
 
-.register-history {
-  margin-top: 4px;
-}
-
 .product-card,
 .panel {
   padding: 20px;
@@ -410,6 +437,11 @@ textarea {
 @media (max-width: 1080px) {
   .register-grid {
     grid-template-columns: 1fr;
+  }
+
+  .register-cart {
+    position: static;
+    top: auto;
   }
 }
 
