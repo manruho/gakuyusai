@@ -3,6 +3,13 @@ import { getStockLevelWithThresholds, getStockStatusText } from '../src/lib/stoc
 import { verifyPassword } from '../src/lib/password';
 import { signSession, verifySession } from '../src/lib/session';
 import { getSetting, getSettings, queryProducts, querySales, querySalesByFilter } from './db/queries';
+import {
+  buildLoginLockedMessage,
+  getLoginThrottle,
+  isLoginLocked,
+  recordLoginFailure,
+  resetLoginThrottle,
+} from './services/authService';
 import { processSale } from './services/saleService';
 import { buildSalesCsv, buildStockEventsCsv } from './services/csvService';
 import { cancelSale, listStock, listStockHistory, recordStockEvent } from './services/stockService';
@@ -53,7 +60,7 @@ app.get('/api/schema', (c) =>
   c.json({
     ok: true,
     data: {
-      tables: ['products', 'product_inventory', 'sales', 'sale_items', 'stock_events', 'settings'],
+      tables: ['products', 'product_inventory', 'sales', 'sale_items', 'stock_events', 'settings', 'login_attempts'],
     },
   }),
 );
@@ -102,6 +109,14 @@ app.post('/api/auth/login', async (c) => {
   const staffPasswordHashFallback = staffPasswordHash;
   const adminPasswordHash = (await getSetting(c.env.DB, 'admin_password_hash')) ?? c.env.ADMIN_PASSWORD_HASH ?? '';
   const ownerPasswordHash = (await getSetting(c.env.DB, 'owner_password_hash')) ?? c.env.OWNER_PASSWORD_HASH ?? '';
+  const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
+  const throttle = await getLoginThrottle(c.env.DB, body.username, ip);
+  if (isLoginLocked(throttle)) {
+    return c.json(
+      { ok: false, error: { code: 'LOGIN_LOCKED', message: buildLoginLockedMessage(throttle?.lockedUntil ?? null) } },
+      429,
+    );
+  }
   const role = body.username === ownerUsername ? 'owner' : body.username === staffUsername || body.username === adminUsername ? 'admin' : null;
   const hash =
     body.username === ownerUsername
@@ -112,11 +127,19 @@ app.post('/api/auth/login', async (c) => {
           ? adminPasswordHash
           : null;
   if (!role || !hash || !(await verifyPassword(body.password, hash))) {
+    const failure = await recordLoginFailure(c.env.DB, body.username, ip);
     return c.json(
-      { ok: false, error: { code: 'INVALID_CREDENTIALS', message: 'ユーザー名またはパスワードが違います。' } },
-      401,
+      {
+        ok: false,
+        error: {
+          code: failure.lockedUntil ? 'LOGIN_LOCKED' : 'INVALID_CREDENTIALS',
+          message: failure.lockedUntil ? buildLoginLockedMessage(failure.lockedUntil) : 'ユーザー名またはパスワードが違います。',
+        },
+      },
+      failure.lockedUntil ? 429 : 401,
     );
   }
+  await resetLoginThrottle(c.env.DB, body.username, ip);
   const token = await signSession(
     {
       role,
