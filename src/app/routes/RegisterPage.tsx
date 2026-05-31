@@ -161,7 +161,7 @@ export function RegisterPage() {
             <div className="register-panel register-products">
               <div className="section-head">
                 <h2>商品を選ぶ</h2>
-                <p className="small">商品名と価格を見ながら、ボタンを押すだけで追加できます。</p>
+                <p className="small">まず商品を選びます。商品ボタンを複数回タップすると、その回数だけ数量が増えます。</p>
               </div>
               <div className="cards register-cards">
                 {items.map((item) => (
