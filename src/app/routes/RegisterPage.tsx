@@ -152,8 +152,37 @@ export function RegisterPage() {
                     onClick={() => add(item.id)}
                   >
                     <div className="product-row-main">
-                      <strong>{item.displayName}</strong>
-                      <span className="product-row-price">{formatYen(item.price)}</span>
+                      <div className="product-row-title">
+                        <strong>{item.displayName}</strong>
+                        <span className="product-row-price">{formatYen(item.price)}</span>
+                      </div>
+                      <div className="product-row-actions">
+                        <button
+                          type="button"
+                          className="product-mini-button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            remove(item.id);
+                          }}
+                          disabled={(selected[item.id] ?? 0) <= 0}
+                          aria-label={`${item.displayName} を 1 個減らす`}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="product-mini-button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            add(item.id);
+                          }}
+                          aria-label={`${item.displayName} を 1 個追加する`}
+                        >
+                          ＋
+                        </button>
+                      </div>
                     </div>
                     <div className="product-row-meta">
                       <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
@@ -235,7 +264,7 @@ export function RegisterPage() {
                         <div>
                           <strong>{item.displayName}</strong>
                           <span>
-                            単価 {formatYen(item.price)} / 数量 {quantity}
+                            {quantity} 個で {formatYen(item.price * quantity)}
                           </span>
                         </div>
                         <strong className="receipt-item-total">{formatYen(item.price * quantity)}</strong>
