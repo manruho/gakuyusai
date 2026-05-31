@@ -305,6 +305,12 @@ h2 {
   font-size: 1.25rem;
 }
 
+.product-row-price {
+  font-size: 1.45rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
 .product-row-main,
 .product-row-meta {
   display: flex;
@@ -314,13 +320,14 @@ h2 {
 }
 
 .product-count {
-  min-width: 2.5rem;
+  min-width: 5rem;
   text-align: center;
-  padding: 0.18rem 0.5rem;
+  padding: 0.25rem 0.7rem;
   border-radius: 6px;
   background: rgba(55, 65, 81, 0.08);
   color: #334155;
   font-weight: 900;
+  font-size: 1rem;
 }
 
 .product-row span {
@@ -380,6 +387,32 @@ h2 {
   display: grid;
   align-content: start;
   gap: 16px;
+}
+
+.register-detail-head {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.register-detail-head div {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.register-detail-head span {
+  font-size: 0.84rem;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.register-detail-head strong {
+  font-size: 1.7rem;
+  line-height: 1.05;
 }
 
 .register-pay-right {
@@ -698,6 +731,19 @@ h2 {
 
 .receipt-inline {
   padding-bottom: 10px;
+}
+
+.receipt-item-total {
+  font-size: 1.2rem;
+}
+
+.receipt-items .receipt-item strong {
+  font-size: 1.05rem;
+}
+
+.receipt-items .receipt-item span {
+  font-size: 0.95rem;
+  color: #475569;
 }
 
 .history-row span,

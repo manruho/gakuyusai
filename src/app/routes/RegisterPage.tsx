@@ -153,11 +153,11 @@ export function RegisterPage() {
                   >
                     <div className="product-row-main">
                       <strong>{item.displayName}</strong>
-                      <span>{formatYen(item.price)}</span>
+                      <span className="product-row-price">{formatYen(item.price)}</span>
                     </div>
                     <div className="product-row-meta">
                       <small>{item.isSoldOut ? '売り切れ' : `残り ${item.currentStock}`}</small>
-                      <span className="product-count">{selected[item.id] ?? 0}</span>
+                      <span className="product-count">{selected[item.id] ?? 0} 点</span>
                     </div>
                   </button>
                 ))}
@@ -215,6 +215,16 @@ export function RegisterPage() {
               <div className="section-head">
                 <h2>会計</h2>
               </div>
+              <div className="register-detail-head">
+                <div>
+                  <span>商品明細</span>
+                  <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)} 点</strong>
+                </div>
+                <div>
+                  <span>会計合計</span>
+                  <strong>{formatYen(total)}</strong>
+                </div>
+              </div>
               <div className="receipt receipt-inline">
                 <div className="receipt-items">
                   {Object.entries(selected).map(([id, quantity]) => {
@@ -225,10 +235,10 @@ export function RegisterPage() {
                         <div>
                           <strong>{item.displayName}</strong>
                           <span>
-                            {formatYen(item.price)} × {quantity}
+                            単価 {formatYen(item.price)} / 数量 {quantity}
                           </span>
                         </div>
-                        <strong>{formatYen(item.price * quantity)}</strong>
+                        <strong className="receipt-item-total">{formatYen(item.price * quantity)}</strong>
                       </div>
                     );
                   })}
