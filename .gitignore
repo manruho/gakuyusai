@@ -5,4 +5,5 @@ dist
 .dev.vars
 playwright-report
 test-results
-
+plan.md
+AGENTS.md
