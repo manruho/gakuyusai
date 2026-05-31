@@ -275,7 +275,7 @@ export function RegisterPage() {
               <button
                 onClick={() => {
                   clear();
-                  setPaidAmount(1000);
+                  setPaidAmount(0);
                   setSaleType('normal');
                 }}
               >
