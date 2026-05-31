@@ -58,7 +58,7 @@ textarea {
 .page {
   min-height: 100vh;
   padding: 36px 20px 48px;
-  max-width: 1240px;
+  max-width: 1520px;
   margin: 0 auto;
 }
 
@@ -221,7 +221,7 @@ h2 {
 }
 
 .register-total strong {
-  font-size: clamp(3.2rem, 8vw, 6.8rem);
+  font-size: clamp(2.2rem, 4vw, 4.2rem);
   line-height: 1;
 }
 
@@ -250,13 +250,13 @@ h2 {
 .register-select,
 .register-pay {
   display: grid;
-  grid-template-columns: minmax(0, 2.45fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.8fr);
   gap: 16px;
   align-items: start;
 }
 
 .register-pay {
-  grid-template-columns: minmax(0, 1.9fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(420px, 1fr);
 }
 
 .register-panel {
@@ -279,7 +279,7 @@ h2 {
 .register-products h2,
 .register-cart h2,
 .register-confirm h2 {
-  font-size: 1.5rem;
+  font-size: 1.7rem;
   color: #374151;
   letter-spacing: 0.02em;
 }
@@ -302,11 +302,11 @@ h2 {
 }
 
 .product-row strong {
-  font-size: 1.8rem;
+  font-size: 2rem;
 }
 
 .product-row-price {
-  font-size: 2.4rem;
+  font-size: 2.7rem;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
@@ -412,7 +412,7 @@ h2 {
 }
 
 .register-detail-head strong {
-  font-size: 3rem;
+  font-size: 4rem;
   line-height: 1.05;
 }
 
@@ -425,7 +425,7 @@ h2 {
 }
 
 .payment-label {
-  font-size: 1.45rem;
+  font-size: 1.8rem;
   font-weight: 800;
   color: #111827;
   letter-spacing: 0.02em;
@@ -436,11 +436,11 @@ h2 {
 }
 
 .confirm-summary p strong {
-  font-size: 3.6rem;
+  font-size: 4.8rem;
 }
 
 .payment-box input {
-  font-size: 3rem;
+  font-size: 3.4rem;
   font-weight: 800;
   text-align: right;
   letter-spacing: 0.04em;
@@ -450,7 +450,7 @@ h2 {
 }
 
 .change {
-  font-size: clamp(2.8rem, 4vw, 5rem);
+  font-size: clamp(3.4rem, 5vw, 6.2rem);
   font-weight: 900;
   color: #111827;
   padding: 0.6rem 0.8rem;
@@ -465,8 +465,8 @@ h2 {
 }
 
 .numpad button {
-  min-height: 86px;
-  font-size: 1.8rem;
+  min-height: 98px;
+  font-size: 2.1rem;
   font-weight: 800;
   border-radius: 6px;
   box-shadow: none;
@@ -477,7 +477,7 @@ h2 {
 }
 
 .register-confirm h2 {
-  font-size: 2.4rem;
+  font-size: 2.8rem;
 }
 
 .confirm-row,
@@ -660,7 +660,7 @@ h2 {
 }
 
 .register-summary strong {
-  font-size: 2.5rem;
+  font-size: 3rem;
 }
 
 .page-form .panel {
@@ -735,16 +735,20 @@ h2 {
 }
 
 .receipt-item-total {
-  font-size: 2.4rem;
+  font-size: 3rem;
 }
 
 .receipt-items .receipt-item strong {
-  font-size: 1.4rem;
+  font-size: 1.7rem;
 }
 
 .receipt-items .receipt-item span {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   color: #475569;
+}
+
+.receipt .receipt-meta strong {
+  font-size: 4rem;
 }
 
 .history-row span,
