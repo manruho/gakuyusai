@@ -221,6 +221,7 @@ export function RegisterPage() {
                     aria-label="預かり金額"
                   />
                 </label>
+                <p className="small">テンキーで入力します。はじめは 0 円です。</p>
                 <p className="change">おつり {formatYen(change)}</p>
                 <div className="numpad">
                   <button onClick={clearPaidAmount}>C</button>
