@@ -211,7 +211,7 @@ export function RegisterPage() {
           </section>
         ) : phase === 'pay' ? (
           <section className="register-pay">
-            <div className="register-panel register-confirm">
+            <div className="register-panel register-confirm register-pay-left">
               <div className="section-head">
                 <h2>会計</h2>
               </div>
@@ -239,6 +239,8 @@ export function RegisterPage() {
                 <p><span className="payment-label">預かり</span><strong>{formatYen(paidAmount)}</strong></p>
                 <p><span className="payment-label">おつり</span><strong>{formatYen(change)}</strong></p>
               </div>
+            </div>
+            <div className="register-panel register-pay-right">
               <div className="payment-box">
                 <label>
                   <span className="payment-label">預かり金額</span>

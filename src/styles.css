@@ -255,6 +255,10 @@ h2 {
   align-items: start;
 }
 
+.register-pay {
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.95fr);
+}
+
 .register-panel {
   border-radius: 8px;
   padding: 20px;
@@ -372,6 +376,20 @@ h2 {
   background: #fafafa;
 }
 
+.register-pay-left {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.register-pay-right {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  position: sticky;
+  top: 18px;
+}
+
 .payment-label {
   font-size: 1rem;
   font-weight: 800;
@@ -384,7 +402,7 @@ h2 {
 }
 
 .confirm-summary p strong {
-  font-size: 1.35rem;
+  font-size: 1.5rem;
 }
 
 .payment-box input {
@@ -706,6 +724,11 @@ textarea {
   }
 
   .register-cart {
+    position: static;
+    top: auto;
+  }
+
+  .register-pay-right {
     position: static;
     top: auto;
   }
