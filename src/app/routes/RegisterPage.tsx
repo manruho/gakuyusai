@@ -147,7 +147,7 @@ export function RegisterPage() {
                 {items.map((item) => (
                   <button
                     key={item.id}
-                    className="product-row"
+                    className={`product-row${(selected[item.id] ?? 0) > 0 ? ' product-row-selected' : ''}`}
                     disabled={!item.isActive || item.isSoldOut}
                     onClick={() => add(item.id)}
                   >
@@ -172,7 +172,7 @@ export function RegisterPage() {
 
             <aside className="register-panel register-cart">
               <div className="section-head">
-                <h2>選択中</h2>
+                <h2 className="cart-title">選択中</h2>
               </div>
               <div className="cart">
                 {selectedCount ? (

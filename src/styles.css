@@ -250,7 +250,7 @@ h2 {
 .register-select,
 .register-pay {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr);
   gap: 16px;
   align-items: start;
 }
@@ -284,6 +284,13 @@ h2 {
   letter-spacing: 0.02em;
 }
 
+.cart-title {
+  font-size: 0.95rem;
+  color: #64748b;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 .product-list {
   display: grid;
   gap: 12px;
@@ -299,6 +306,28 @@ h2 {
   border-radius: 6px;
   background: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.product-row:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(71, 85, 105, 0.2),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.product-row:active:not(:disabled),
+.product-row-selected {
+  transform: translateY(1px);
+  background: #eef2ff;
+  border-color: rgba(79, 70, 229, 0.34);
+  box-shadow:
+    inset 0 0 0 2px rgba(79, 70, 229, 0.35),
+    0 2px 8px rgba(79, 70, 229, 0.14);
 }
 
 .product-row strong {
@@ -324,8 +353,8 @@ h2 {
   text-align: center;
   padding: 0.35rem 0.85rem;
   border-radius: 6px;
-  background: rgba(55, 65, 81, 0.08);
-  color: #334155;
+  background: rgba(79, 70, 229, 0.08);
+  color: #312e81;
   font-weight: 900;
   font-size: 1.35rem;
 }
@@ -355,6 +384,12 @@ h2 {
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid rgba(148, 163, 184, 0.16);
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.cart-row:hover {
+  background: #fafafa;
+  border-color: rgba(148, 163, 184, 0.26);
 }
 
 .cart-main {
