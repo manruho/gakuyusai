@@ -2,11 +2,43 @@
   "name": "gakuyusai",
   "compatibility_date": "2026-05-30",
   "pages_build_output_dir": "dist",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REALTIME_HUB",
+        "class_name": "RealtimeHub",
+        "script_name": "gakuyusai-realtime"
+      }
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "gakuyusai",
-      "database_id": "1f791e5e-c06f-46a1-9838-02ce7ceb53bc"
-    }
-  ]
+      "database_id": "1f791e5e-c06f-46a1-9838-02ce7ceb53bc",
+    },
+  ],
+  "env": {
+    "preview": {
+      "vars": {
+        "PREVIEW_AUTH_BYPASS": "true",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "gakuyusai-preview",
+          "database_id": "8259924a-89d4-49f3-8f11-dd9a7a895b8d",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "REALTIME_HUB",
+            "class_name": "RealtimeHub",
+            "script_name": "gakuyusai-realtime"
+          }
+        ]
+      },
+    },
+  },
 }

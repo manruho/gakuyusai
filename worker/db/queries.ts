@@ -2,6 +2,7 @@ export type ProductRow = {
   id: string;
   name: string;
   display_name: string;
+  category: string;
   price: number;
   initial_stock: number;
   current_stock: number;
@@ -18,9 +19,9 @@ export type ProductRow = {
 type SettingRow = { key: string; value: string };
 
 export async function queryProducts(db: D1Database, onlyPublic = false): Promise<ProductRow[]> {
-  const where = onlyPublic ? 'WHERE p.is_public = 1 AND p.is_active = 1' : '';
+  const where = onlyPublic ? 'WHERE p.is_public = 1 AND p.is_active = 1 AND p.deleted_at IS NULL' : 'WHERE p.deleted_at IS NULL';
   const rows = await db.prepare(
-    `SELECT p.id, p.name, p.display_name, p.price, p.initial_stock, i.current_stock,
+    `SELECT p.id, p.name, p.display_name, p.category, p.price, p.initial_stock, i.current_stock,
             p.is_public, p.is_active, p.sort_order, p.allergy_text, p.description, p.note,
             p.created_at, p.updated_at
      FROM products p
@@ -51,7 +52,8 @@ export async function querySales(db: D1Database): Promise<
     change_amount: number;
     payment_method: 'cash' | 'prepaid';
     status: 'completed' | 'canceled';
-    created_by_role: 'admin' | 'owner';
+    created_by_role: 'staff' | 'admin' | 'owner';
+    register_id: number;
     created_at: string;
     canceled_at: string | null;
   }>
@@ -59,7 +61,7 @@ export async function querySales(db: D1Database): Promise<
   const rows = await db
     .prepare(
       `SELECT id, idempotency_key, sale_type, total_amount, paid_amount, change_amount,
-              payment_method, status, created_by_role, created_at, canceled_at
+              payment_method, status, created_by_role, register_id, created_at, canceled_at
        FROM sales
        ORDER BY created_at DESC`,
     )
@@ -73,7 +75,8 @@ export async function querySales(db: D1Database): Promise<
     change_amount: number;
     payment_method: 'cash' | 'prepaid';
     status: 'completed' | 'canceled';
-    created_by_role: 'admin' | 'owner';
+    created_by_role: 'staff' | 'admin' | 'owner';
+    register_id: number;
     created_at: string;
     canceled_at: string | null;
   }>;
@@ -92,7 +95,8 @@ export async function querySalesByFilter(
     change_amount: number;
     payment_method: 'cash' | 'prepaid';
     status: 'completed' | 'canceled';
-    created_by_role: 'admin' | 'owner';
+    created_by_role: 'staff' | 'admin' | 'owner';
+    register_id: number;
     created_at: string;
     canceled_at: string | null;
   }>
@@ -102,7 +106,7 @@ export async function querySalesByFilter(
   const rows = await db
     .prepare(
       `SELECT s.id, s.idempotency_key, s.sale_type, s.total_amount, s.paid_amount, s.change_amount,
-              s.payment_method, s.status, s.created_by_role, s.created_at, s.canceled_at,
+              s.payment_method, s.status, s.created_by_role, s.register_id, s.created_at, s.canceled_at,
               GROUP_CONCAT(si.product_id, ' ') AS product_ids
        FROM sales s
        LEFT JOIN sale_items si ON si.sale_id = s.id
@@ -123,7 +127,8 @@ export async function querySalesByFilter(
       change_amount: number;
       payment_method: 'cash' | 'prepaid';
       status: 'completed' | 'canceled';
-      created_by_role: 'admin' | 'owner';
+      created_by_role: 'staff' | 'admin' | 'owner';
+      register_id: number;
       created_at: string;
       canceled_at: string | null;
       product_ids?: string | null;
@@ -131,7 +136,11 @@ export async function querySalesByFilter(
   >;
 
   if (!query) {
-    return sales.map(({ product_ids: _productIds, ...sale }) => sale);
+    return sales.map((sale) => {
+      const result = { ...sale };
+      delete result.product_ids;
+      return result;
+    });
   }
 
   return sales
@@ -150,5 +159,9 @@ export async function querySalesByFilter(
         .toLowerCase();
       return haystack.includes(query);
     })
-    .map(({ product_ids: _productIds, ...sale }) => sale);
+    .map((sale) => {
+      const result = { ...sale };
+      delete result.product_ids;
+      return result;
+    });
 }

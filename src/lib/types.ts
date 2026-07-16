@@ -1,15 +1,17 @@
-export type Role = 'public' | 'admin' | 'owner';
+export type Role = 'public' | 'staff' | 'pickup' | 'admin' | 'owner';
 
 export type StockLevel = 0 | 1 | 2 | 3;
 
 export type PublicStatusItem = {
   id: string;
   displayName: string;
+  category: string;
   price: number;
   statusLevel: StockLevel;
   statusText: string;
   isSoldOut: boolean;
   allergyText: string;
+  description: string;
   note: string;
 };
 
@@ -21,8 +23,10 @@ export type PublicStatusResponse = {
 };
 
 export type SessionPayload = {
-  role: 'admin' | 'owner';
+  role: 'staff' | 'pickup' | 'admin' | 'owner';
   username: string;
+  registerId?: 1 | 2 | 3 | 4;
+  stationId?: 1 | 2 | 3 | 4;
   exp: number;
 };
 
@@ -30,6 +34,7 @@ export type ProductRecord = {
   id: string;
   name: string;
   displayName: string;
+  category: string;
   price: number;
   initialStock: number;
   currentStock: number;
@@ -42,4 +47,3 @@ export type ProductRecord = {
   createdAt: string;
   updatedAt: string;
 };
-

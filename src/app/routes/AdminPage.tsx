@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatYen } from '../../lib/money';
 
 type Product = {
@@ -12,6 +12,9 @@ type Product = {
   isPublic?: boolean;
   is_active?: number;
   isActive?: boolean;
+  current_stock?: number;
+  currentStock?: number;
+  category?: string;
   sort_order?: number;
   sortOrder?: number;
   allergy_text?: string;
@@ -32,12 +35,21 @@ type Settings = {
   threshold_low: string;
   threshold_mid: string;
   threshold_high: string;
+  pickup_1_username: string;
+  pickup_1_password_hash: string;
+  pickup_2_username: string;
+  pickup_2_password_hash: string;
+  pickup_3_username: string;
+  pickup_3_password_hash: string;
+  pickup_4_username: string;
+  pickup_4_password_hash: string;
 };
 
 type EditForm = {
   id: string;
   name: string;
   displayName: string;
+  category: string;
   price: number;
   initialStock: number;
   isPublic: boolean;
@@ -61,10 +73,27 @@ type Sale = {
   items: Array<{ product_id: string; quantity: number; unit_price: number; subtotal: number }>;
 };
 
+const CATEGORIES = ['おにぎり', 'サイドメニュー', '飲み物'] as const;
+type ProductCategory = (typeof CATEGORIES)[number];
+
+function normalizeCategory(item: Product): ProductCategory {
+  const raw = `${item.category ?? ''}`.trim();
+  if (CATEGORIES.includes(raw as ProductCategory)) return raw as ProductCategory;
+  const fallback = `${item.displayName ?? ''} ${item.name ?? ''}`.trim();
+  if (/飲み物|ドリンク|ジュース|麦茶|ラムネ|お茶|水/.test(fallback)) return '飲み物';
+  if (/サイド|唐揚げ|からあげ|玉子|たまご|フライ|ポテト|枝豆|サラダ/.test(fallback)) return 'サイドメニュー';
+  return 'おにぎり';
+}
+
+function getCategoryLabel(category: ProductCategory) {
+  return category === '飲み物' ? 'のみもの' : category;
+}
+
 const emptyForm: EditForm = {
   id: '',
   name: '',
   displayName: '',
+  category: 'おにぎり',
   price: 0,
   initialStock: 0,
   isPublic: true,
@@ -74,6 +103,23 @@ const emptyForm: EditForm = {
   description: '',
   note: '',
 };
+
+function toEditForm(item: Product): EditForm {
+  return {
+    id: item.id,
+    name: item.name,
+    displayName: item.displayName,
+    category: item.category ?? normalizeCategory(item),
+    price: item.price,
+    initialStock: item.initialStock ?? item.initial_stock ?? 0,
+    isPublic: Boolean(item.isPublic ?? item.is_public),
+    isActive: Boolean(item.isActive ?? item.is_active),
+    sortOrder: item.sortOrder ?? item.sort_order ?? 0,
+    allergyText: item.allergyText ?? item.allergy_text ?? '',
+    description: item.description ?? '',
+    note: item.note ?? '',
+  };
+}
 
 const defaultSettings: Settings = {
   public_status_enabled: 'true',
@@ -87,6 +133,10 @@ const defaultSettings: Settings = {
   threshold_low: '0.15',
   threshold_mid: '0.35',
   threshold_high: '0.65',
+  pickup_1_username: 'pickup-1', pickup_1_password_hash: '',
+  pickup_2_username: 'pickup-2', pickup_2_password_hash: '',
+  pickup_3_username: 'pickup-3', pickup_3_password_hash: '',
+  pickup_4_username: 'pickup-4', pickup_4_password_hash: '',
 };
 
 export function AdminPage() {
@@ -97,32 +147,34 @@ export function AdminPage() {
   const [saleQuery, setSaleQuery] = useState('');
   const [sales, setSales] = useState<Sale[]>([]);
   const [summary, setSummary] = useState<{ totalSales: number; completedSales: number; totalProducts: number; totalQuantity: number } | null>(null);
-  const [form, setForm] = useState<EditForm>(emptyForm);
+  const [drafts, setDrafts] = useState<Record<string, EditForm>>({});
+  const [newDraft, setNewDraft] = useState<EditForm | null>(null);
+  const [savingProductId, setSavingProductId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [selectedCategory, setSelectedCategory] = useState<ProductCategory>('おにぎり');
 
   const load = async () => {
     const response = await fetch('/api/admin/products');
     const json = (await response.json()) as { ok: true; data: { items: Product[] } } | { ok: false; error: { message: string } };
     if (json.ok) {
       setItems(json.data.items);
-      if (!form.id && json.data.items[0]) {
-        const first = json.data.items[0];
-        setForm({
-          id: first.id,
-          name: first.name,
-          displayName: first.displayName,
-          price: first.price,
-          initialStock: first.initialStock ?? first.initial_stock ?? 0,
-          isPublic: Boolean(first.isPublic ?? first.is_public),
-          isActive: Boolean(first.isActive ?? first.is_active),
-          sortOrder: first.sortOrder ?? first.sort_order ?? 0,
-          allergyText: first.allergyText ?? first.allergy_text ?? '',
-          description: first.description ?? '',
-          note: first.note ?? '',
-        });
-      }
+      setDrafts(Object.fromEntries(json.data.items.map((item) => [item.id, toEditForm(item)])));
     }
   };
+
+  const visibleItems = useMemo(
+    () => items.filter((item) => normalizeCategory(item) === selectedCategory),
+    [items, selectedCategory],
+  );
+
+  const itemCounts = useMemo(
+    () =>
+      CATEGORIES.map((category) => ({
+        category,
+        count: items.filter((item) => normalizeCategory(item) === category).length,
+      })),
+    [items],
+  );
 
   const loadSettings = async () => {
     const response = await fetch('/api/admin/settings');
@@ -185,7 +237,12 @@ export function AdminPage() {
       body: JSON.stringify({ key, value }),
     });
     const json = (await response.json()) as { ok: true } | { ok: false; error: { message: string } };
-    setMessage(json.ok ? '設定を更新しました' : json.error.message);
+    if (json.ok) {
+      setSettings((current) => ({ ...current, [key]: value }));
+      setMessage('設定を更新しました');
+    } else {
+      setMessage(json.error.message);
+    }
   };
 
   const loadCsv = async () => {
@@ -214,14 +271,40 @@ export function AdminPage() {
     if (json.ok) setSummary(json.data);
   };
 
-  const saveProduct = async () => {
-    const response = await fetch(`/api/admin/products/${encodeURIComponent(form.id)}`, {
-      method: 'PUT',
+  const updateDraft = (id: string, changes: Partial<EditForm>) => {
+    setDrafts((current) => ({ ...current, [id]: { ...(current[id] ?? emptyForm), ...changes } }));
+  };
+
+  const saveProduct = async (draft: EditForm, isNew = false) => {
+    if (!draft.id.trim() || !draft.name.trim() || !draft.displayName.trim()) {
+      setMessage('商品ID・商品名・表示名を入力してください');
+      return;
+    }
+    setSavingProductId(draft.id);
+    const isExisting = !isNew && items.some((item) => item.id === draft.id);
+    const response = await fetch(isExisting ? `/api/admin/products/${encodeURIComponent(draft.id)}` : '/api/admin/products', {
+      method: isExisting ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify(draft),
     });
     const json = (await response.json()) as { ok: true } | { ok: false; error: { message: string } };
     setMessage(json.ok ? '商品を保存しました' : json.error.message);
+    if (json.ok) {
+      if (isNew) setNewDraft(null);
+      void load();
+    }
+    setSavingProductId(null);
+  };
+
+  const archiveProduct = async (item: Product) => {
+    const confirmation = window.prompt(`「${item.displayName}」を消去します。\n販売履歴がある場合も履歴を保護したうえで商品一覧から消えます。\n実行するには「消去」と入力してください。`);
+    if (confirmation !== '消去') {
+      setMessage('消去をキャンセルしました。「消去」と正確に入力した場合だけ実行されます。');
+      return;
+    }
+    const response = await fetch(`/api/admin/products/${encodeURIComponent(item.id)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation }) });
+    const json = (await response.json()) as { ok: true } | { ok: false; error: { message: string } };
+    setMessage(json.ok ? '商品を消去しました。販売履歴は保持されています。' : json.error.message);
     if (json.ok) void load();
   };
 
@@ -241,36 +324,64 @@ export function AdminPage() {
       <section className="panel">
         <div className="admin-hero">
           <div>
-            <p className="eyebrow">Admin Console</p>
+            <p className="eyebrow">運用管理</p>
             <h1>管理画面</h1>
-            <p className="small">販売履歴、商品管理、設定変更をまとめています。</p>
+            <p className="small">上から順に、状態確認 → 履歴確認 → 商品・設定変更を行えます。</p>
           </div>
           <div className="toolbar">
             <a className="admin-link-button" href="/staff/register">
               レジへ
             </a>
+            <a className="admin-link-button" href="/admin/fulfillment">
+              受取状況
+            </a>
           </div>
         </div>
-        {message ? <p className="error">{message}</p> : null}
-        <section className="admin-panel">
+        <nav className="admin-nav" aria-label="管理画面のメニュー">
+          <a href="#overview">概要</a>
+          <a href="#sales-history">販売履歴</a>
+          <a href="#products">商品マスタ</a>
+          <a href="#settings">設定</a>
+          <a href="#exports">CSV出力</a>
+        </nav>
+        {message ? <p className="admin-feedback" role="status">{message}</p> : null}
+        <section className="admin-panel" id="overview">
           <div className="section-head">
-            <h2>運用設定</h2>
-            <p className="small">公開ON/OFF、販売ON/OFF、CSV、集計をここにまとめています。</p>
+            <div>
+              <p className="admin-section-kicker">01 / 概要</p>
+              <h2>今日の運用状態</h2>
+            </div>
+            <p className="small">現在の状態を確認してから、必要な操作を選択してください。</p>
           </div>
-          <div className="toolbar admin-primary-actions">
-            <button onClick={() => togglePublic('public_status_enabled', 'true')}>公開ON</button>
-            <button onClick={() => togglePublic('public_status_enabled', 'false')}>公開OFF</button>
-            <button onClick={() => togglePublic('sales_open', 'true')}>販売ON</button>
-            <button onClick={loadCsv}>CSV取得</button>
-            <button onClick={loadSummary}>集計更新</button>
+          <div className="admin-status-grid">
+            <div className="admin-status-card">
+              <div><span>公開ページ</span><strong>{settings.public_status_enabled === 'true' ? '公開中' : '停止中'}</strong></div>
+              <button type="button" onClick={() => void togglePublic('public_status_enabled', settings.public_status_enabled === 'true' ? 'false' : 'true')}>
+                {settings.public_status_enabled === 'true' ? '公開を停止' : '公開する'}
+              </button>
+            </div>
+            <div className="admin-status-card">
+              <div><span>販売受付</span><strong>{settings.sales_open === 'true' ? '受付中' : '停止中'}</strong></div>
+              <button type="button" onClick={() => void togglePublic('sales_open', settings.sales_open === 'true' ? 'false' : 'true')}>
+                {settings.sales_open === 'true' ? '販売を停止' : '販売を開始'}
+              </button>
+            </div>
+          </div>
+          <div className="admin-tool-row">
+            <button type="button" onClick={() => void loadSummary()}>集計を更新</button>
+            <button type="button" onClick={() => void loadCsv()}>CSVプレビューを読み込む</button>
           </div>
         </section>
-        <section className="admin-panel">
+        <section className="admin-panel" id="settings">
           <div className="section-head">
-            <h2>システム設定</h2>
-            <p className="small">ログイン情報としきい値を変更します。保存は1回だけ押してください。</p>
+            <div>
+              <p className="admin-section-kicker">02 / 設定</p>
+              <h2>システム設定</h2>
+            </div>
+            <p className="small">変更した項目を確認してから、最後に保存してください。</p>
           </div>
           <div className="form-grid admin-form-grid">
+            <div className="admin-form-subhead"><strong>ログインアカウント</strong><span>担当者ごとのログイン名と認証情報です。</span></div>
             <label>
               staff username
               <span className="field-help">スタッフ用のログイン名です。</span>
@@ -301,6 +412,7 @@ export function AdminPage() {
               <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
               <textarea value={settings.owner_password_hash} onChange={(e) => setSettings((current) => ({ ...current, owner_password_hash: e.target.value }))} />
             </label>
+            <div className="admin-form-subhead"><strong>在庫表示のしきい値</strong><span>公開ページの在庫表示を切り替える基準値です。</span></div>
             <label>
               しきい値 low
               <span className="field-help">在庫表示の最小ラインです。</span>
@@ -316,9 +428,22 @@ export function AdminPage() {
               <span className="field-help">十分ある状態のラインです。</span>
               <input value={settings.threshold_high} onChange={(e) => setSettings((current) => ({ ...current, threshold_high: e.target.value }))} />
             </label>
+            <div className="admin-form-subhead"><strong>受取窓口アカウント</strong><span>受取1〜4のログイン情報です。受取場所ごとに設定できます。</span></div>
+            {[1, 2, 3, 4].map((stationId) => {
+              const usernameKey = `pickup_${stationId}_username` as keyof Settings;
+              const passwordKey = `pickup_${stationId}_password_hash` as keyof Settings;
+              return (
+                <div className="settings-group" key={stationId}>
+                  <strong>受取{stationId} アカウント</strong>
+                  <label>username<input value={settings[usernameKey]} onChange={(e) => setSettings((current) => ({ ...current, [usernameKey]: e.target.value }))} /></label>
+                  <label>password hash<textarea value={settings[passwordKey]} onChange={(e) => setSettings((current) => ({ ...current, [passwordKey]: e.target.value }))} /></label>
+                </div>
+              );
+            })}
           </div>
-          <div className="toolbar admin-primary-actions">
-            <button onClick={saveSettings}>ログイン情報としきい値を保存</button>
+          <div className="toolbar admin-primary-actions admin-save-bar">
+            <span className="small">パスワードはハッシュ形式で管理されます。</span>
+            <button type="button" onClick={() => void saveSettings()}>設定を保存</button>
           </div>
         </section>
         {summary ? (
@@ -329,10 +454,13 @@ export function AdminPage() {
             <p>販売数: {summary.totalQuantity}</p>
           </div>
         ) : null}
-        <section className="admin-panel admin-history-panel">
+        <section className="admin-panel admin-history-panel" id="sales-history">
           <div className="section-head">
-            <h2>販売履歴</h2>
-            <p className="small">販売履歴は admin / owner だけが見られます。</p>
+            <div>
+              <p className="admin-section-kicker">03 / 確認</p>
+              <h2>販売履歴</h2>
+            </div>
+            <p className="small">検索すると自動で絞り込みます。最新50件を表示しています。</p>
           </div>
           <label>
             検索
@@ -363,107 +491,88 @@ export function AdminPage() {
             )}
           </div>
         </section>
-        <section className="admin-panel">
+        <section className="admin-panel" id="products">
           <div className="section-head">
-            <h2>商品編集</h2>
-            <p className="small">一覧から選んで編集して、保存を押します。</p>
+            <div>
+              <p className="admin-section-kicker">04 / 変更</p>
+              <h2>商品マスタ</h2>
+            </div>
+            <p className="small">表のセルを直接編集し、行ごとの保存ボタンで確定します。保存するまで本番データは変わりません。</p>
           </div>
-          <div className="cards admin-product-cards">
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className="product-card"
-                role="button"
-                tabIndex={0}
-                onClick={() =>
-                  setForm({
-                    id: item.id,
-                    name: item.name,
-                    displayName: item.displayName,
-                    price: item.price,
-                    initialStock: item.initialStock ?? item.initial_stock ?? 0,
-                    isPublic: Boolean(item.isPublic ?? item.is_public),
-                    isActive: Boolean(item.isActive ?? item.is_active),
-                    sortOrder: item.sortOrder ?? item.sort_order ?? 0,
-                    allergyText: item.allergyText ?? item.allergy_text ?? '',
-                    description: item.description ?? '',
-                    note: item.note ?? '',
-                  })
-                }
-              >
-                <h2>{item.displayName}</h2>
-                <p>{item.name}</p>
-                <p>{formatYen(item.price)}</p>
-                <p>初期在庫: {item.initialStock ?? item.initial_stock ?? '-'}</p>
-                <p>アレルギー: {item.allergyText ?? item.allergy_text ?? '-'}</p>
-                <p>備考: {item.note ?? '-'}</p>
-              </article>
-            ))}
-          </div>
-          <div className="form-grid">
-            <label>
-              ID
-              <input value={form.id} onChange={(e) => setForm((current) => ({ ...current, id: e.target.value }))} />
-            </label>
-            <label>
-              商品名
-              <input value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))} />
-            </label>
-            <label>
-              表示名
-              <input value={form.displayName} onChange={(e) => setForm((current) => ({ ...current, displayName: e.target.value }))} />
-            </label>
-            <label>
-              価格
-              <input type="number" value={form.price} onChange={(e) => setForm((current) => ({ ...current, price: Number(e.target.value) }))} />
-            </label>
-            <label>
-              初期在庫
-              <input type="number" value={form.initialStock} onChange={(e) => setForm((current) => ({ ...current, initialStock: Number(e.target.value) }))} />
-            </label>
-            <label>
-              表示順
-              <input type="number" value={form.sortOrder} onChange={(e) => setForm((current) => ({ ...current, sortOrder: Number(e.target.value) }))} />
-            </label>
-            <label>
-              アレルギー
-              <input value={form.allergyText} onChange={(e) => setForm((current) => ({ ...current, allergyText: e.target.value }))} />
-            </label>
-            <label>
-              備考
-              <input value={form.note} onChange={(e) => setForm((current) => ({ ...current, note: e.target.value }))} />
-            </label>
-            <label>
-              説明
-              <textarea value={form.description} onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))} />
-            </label>
-          </div>
-          <div className="toolbar admin-primary-actions">
-            <label>
-              <input
-                type="checkbox"
-                checked={form.isPublic}
-                onChange={(e) => setForm((current) => ({ ...current, isPublic: e.target.checked }))}
-              />
-              公開
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(e) => setForm((current) => ({ ...current, isActive: e.target.checked }))}
-              />
-              有効
-            </label>
-            <button onClick={saveProduct} disabled={!form.id}>
-              保存
-            </button>
+          <div className="product-editor product-database-editor">
+            <div className="product-browser">
+              <nav className="admin-category-tabs" aria-label="商品カテゴリを切り替える">
+                {itemCounts.map(({ category, count }) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={selectedCategory === category ? 'admin-category-tab is-active' : 'admin-category-tab'}
+                    onClick={() => setSelectedCategory(category)}
+                    aria-pressed={selectedCategory === category}
+                  >
+                    <span>{getCategoryLabel(category)}</span>
+                    <strong>{count}</strong>
+                  </button>
+                ))}
+              </nav>
+              <div className="admin-product-list-head">
+                <span>{getCategoryLabel(selectedCategory)}の商品 {visibleItems.length}件</span>
+                <button type="button" onClick={() => setNewDraft(newDraft ?? { ...emptyForm, sortOrder: items.length + 1 })}>＋ 新しい商品</button>
+              </div>
+              <div className="admin-product-table-wrap">
+                <table className="admin-product-table">
+                  <thead><tr><th>商品ID</th><th>商品名</th><th>表示名</th><th>カテゴリ</th><th>価格</th><th>初期在庫</th><th>現在庫</th><th>公開</th><th>有効</th><th>表示順</th><th>説明・備考</th><th>操作</th></tr></thead>
+                  <tbody>
+                    {newDraft ? (
+                      <tr className="admin-product-edit-row is-new-row">
+                        <td><input value={newDraft.id} placeholder="商品ID" onChange={(event) => setNewDraft({ ...newDraft, id: event.target.value })} /></td>
+                        <td><input value={newDraft.name} placeholder="内部名" onChange={(event) => setNewDraft({ ...newDraft, name: event.target.value })} /></td>
+                        <td><input value={newDraft.displayName} placeholder="表示名" onChange={(event) => setNewDraft({ ...newDraft, displayName: event.target.value })} /></td>
+                        <td><select value={newDraft.category} onChange={(event) => setNewDraft({ ...newDraft, category: event.target.value })}>{CATEGORIES.map((category) => <option key={category} value={category}>{getCategoryLabel(category)}</option>)}</select></td>
+                        <td><input className="number-input" type="number" value={newDraft.price} onChange={(event) => setNewDraft({ ...newDraft, price: Number(event.target.value) })} /></td>
+                        <td><input className="number-input" type="number" value={newDraft.initialStock} onChange={(event) => setNewDraft({ ...newDraft, initialStock: Number(event.target.value) })} /></td>
+                        <td>—</td>
+                        <td><input type="checkbox" checked={newDraft.isPublic} onChange={(event) => setNewDraft({ ...newDraft, isPublic: event.target.checked })} /></td>
+                        <td><input type="checkbox" checked={newDraft.isActive} onChange={(event) => setNewDraft({ ...newDraft, isActive: event.target.checked })} /></td>
+                        <td><input className="number-input" type="number" value={newDraft.sortOrder} onChange={(event) => setNewDraft({ ...newDraft, sortOrder: Number(event.target.value) })} /></td>
+                        <td><input value={newDraft.allergyText} placeholder="アレルギー" onChange={(event) => setNewDraft({ ...newDraft, allergyText: event.target.value })} /><input value={newDraft.description} placeholder="説明" onChange={(event) => setNewDraft({ ...newDraft, description: event.target.value })} /><input value={newDraft.note} placeholder="備考" onChange={(event) => setNewDraft({ ...newDraft, note: event.target.value })} /></td>
+                        <td className="admin-product-actions"><button type="button" onClick={() => void saveProduct(newDraft, true)} disabled={savingProductId === newDraft.id || !newDraft.id || !newDraft.name || !newDraft.displayName}>追加</button><button type="button" className="table-link-button" onClick={() => setNewDraft(null)}>取消</button></td>
+                      </tr>
+                    ) : null}
+                    {visibleItems.map((item) => {
+                      const draft = drafts[item.id] ?? toEditForm(item);
+                      const currentStock = item.currentStock ?? item.current_stock ?? 0;
+                      return (
+                        <tr key={item.id} className="admin-product-edit-row">
+                          <td><input value={draft.id} disabled /></td>
+                          <td><input value={draft.name} onChange={(event) => updateDraft(item.id, { name: event.target.value })} /></td>
+                          <td><input value={draft.displayName} onChange={(event) => updateDraft(item.id, { displayName: event.target.value })} /></td>
+                          <td><select value={draft.category} onChange={(event) => updateDraft(item.id, { category: event.target.value })}>{CATEGORIES.map((category) => <option key={category} value={category}>{getCategoryLabel(category)}</option>)}</select></td>
+                          <td><input className="number-input" type="number" value={draft.price} onChange={(event) => updateDraft(item.id, { price: Number(event.target.value) })} /></td>
+                          <td><input className="number-input" type="number" value={draft.initialStock} onChange={(event) => updateDraft(item.id, { initialStock: Number(event.target.value) })} /></td>
+                          <td>{currentStock}</td>
+                          <td><input type="checkbox" checked={draft.isPublic} onChange={(event) => updateDraft(item.id, { isPublic: event.target.checked })} /></td>
+                          <td><input type="checkbox" checked={draft.isActive} onChange={(event) => updateDraft(item.id, { isActive: event.target.checked })} /></td>
+                          <td><input className="number-input" type="number" value={draft.sortOrder} onChange={(event) => updateDraft(item.id, { sortOrder: Number(event.target.value) })} /></td>
+                          <td><input value={draft.allergyText} placeholder="アレルギー" onChange={(event) => updateDraft(item.id, { allergyText: event.target.value })} /><input value={draft.description} placeholder="説明" onChange={(event) => updateDraft(item.id, { description: event.target.value })} /><input value={draft.note} placeholder="備考" onChange={(event) => updateDraft(item.id, { note: event.target.value })} /></td>
+                          <td className="admin-product-actions"><button type="button" onClick={() => void saveProduct(draft)} disabled={savingProductId === item.id}>{savingProductId === item.id ? '保存中' : '保存'}</button><button type="button" className="table-link-button danger-text" onClick={() => void archiveProduct(item)}>消去</button></td>
+                        </tr>
+                      );
+                    })}
+                    {!visibleItems.length && !newDraft ? <tr><td colSpan={12} className="admin-table-empty">商品がありません。「＋ 新しい商品」から追加できます。</td></tr> : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </section>
-        <section className="admin-panel">
+        <section className="admin-panel" id="exports">
           <div className="section-head">
-            <h2>CSVプレビュー</h2>
-            <p className="small">出力前に中身を確認できます。</p>
+            <div>
+              <p className="admin-section-kicker">05 / 出力</p>
+              <h2>CSV出力</h2>
+            </div>
+            <p className="small">必要なデータをダウンロードして、表計算ソフトで確認できます。</p>
           </div>
           {csv ? (
             <label>

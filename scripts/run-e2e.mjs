@@ -32,8 +32,8 @@ try {
   if (!(await page.getByRole('heading', { name: '文化祭食品販売' }).isVisible())) {
     throw new Error('公開ページの見出しが表示されていません');
   }
-  if (!(await page.getByText('最終更新').isVisible())) {
-    throw new Error('公開ページの最終更新が表示されていません');
+  if (!(await page.getByText('販売状況を更新しました').isVisible())) {
+    throw new Error('公開ページの更新表示がありません');
   }
 
   await page.goto('http://127.0.0.1:4173/login', { waitUntil: 'networkidle' });

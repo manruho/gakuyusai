@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { formatYen } from '../../lib/money';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { formatYen } from "../../lib/money";
 
 type Product = {
   id: string;
   displayName: string;
+  category: string;
   price: number;
   currentStock: number;
+  statusLevel: number;
   isSoldOut: boolean;
   isActive: boolean;
 };
@@ -18,189 +20,460 @@ type ReceiptItem = {
   subtotal: number;
 };
 
+type Receipt = {
+  saleId: string;
+  items: ReceiptItem[];
+  totalAmount: number;
+  paidAmount: number;
+  changeAmount: number;
+  pickupCode: string;
+  registerId: number;
+  stationId: number;
+};
+
+const CATEGORIES = ["おにぎり", "サイドメニュー", "飲み物"] as const;
+type ProductCategory = (typeof CATEGORIES)[number];
+type SaleType = "normal" | "presale_pickup";
+type Phase = "select" | "pay" | "complete";
+
+async function readApiResponse<T>(response: Response): Promise<T> {
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(`サーバーが応答できませんでした（HTTP ${response.status}）。もう一度お試しください。`);
+  }
+}
+
+function normalizeCategory(item: Product): ProductCategory {
+  const raw = `${item.category ?? ""} ${item.displayName ?? ""}`.trim();
+  if (CATEGORIES.includes(raw as ProductCategory))
+    return raw as ProductCategory;
+  if (/飲み物|ドリンク|ジュース|麦茶|ラムネ|お茶|水/.test(raw)) return "飲み物";
+  if (/サイド|唐揚げ|からあげ|玉子|たまご|フライ|ポテト|枝豆|サラダ/.test(raw))
+    return "サイドメニュー";
+  return "おにぎり";
+}
+
+function getCategoryLabel(category: ProductCategory) {
+  return category === "飲み物" ? "のみもの" : category;
+}
+
 export function RegisterPage() {
   const [items, setItems] = useState<Product[]>([]);
   const [selected, setSelected] = useState<Record<string, number>>({});
+  const [selectedOrder, setSelectedOrder] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] =
+    useState<ProductCategory>("おにぎり");
   const [paidAmount, setPaidAmount] = useState(0);
-  const [saleType, setSaleType] = useState<'normal' | 'presale_pickup'>('normal');
-  const [phase, setPhase] = useState<'select' | 'pay' | 'complete'>('select');
-  const [message, setMessage] = useState('');
-  const [role, setRole] = useState<'admin' | 'owner' | null>(null);
-  const [receipt, setReceipt] = useState<{ saleId: string; items: ReceiptItem[]; totalAmount: number; paidAmount: number; changeAmount: number } | null>(null);
+  const [saleType, setSaleType] = useState<SaleType>("normal");
+  const [phase, setPhase] = useState<Phase>("select");
+  const [message, setMessage] = useState("");
+  const [checkoutError, setCheckoutError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [role, setRole] = useState<"staff" | "admin" | "owner" | null>(null);
+  const [registerId, setRegisterId] = useState(1);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const submittingRef = useRef(false);
+  const phaseHeadingRef = useRef<HTMLHeadingElement>(null);
+
   const total = useMemo(
-    () => items.reduce((sum, item) => sum + (selected[item.id] ?? 0) * item.price, 0),
+    () =>
+      items.reduce(
+        (sum, item) => sum + (selected[item.id] ?? 0) * item.price,
+        0,
+      ),
     [items, selected],
   );
+  const visibleItems = useMemo(
+    () => items.filter((item) => normalizeCategory(item) === selectedCategory),
+    [items, selectedCategory],
+  );
+  const selectedEntries = useMemo(() => {
+    const ids = Object.keys(selected);
+    const orderedIds = [
+      ...selectedOrder.filter((id) => selected[id] > 0),
+      ...ids.filter((id) => !selectedOrder.includes(id)),
+    ];
+    return orderedIds.flatMap((id) => {
+      const quantity = selected[id] ?? 0;
+      const item = items.find((entry) => entry.id === id);
+      return item && quantity > 0 ? [{ item, quantity }] : [];
+    });
+  }, [items, selected, selectedOrder]);
+  const selectedCount = selectedEntries.reduce(
+    (sum, entry) => sum + entry.quantity,
+    0,
+  );
+  const shortage = Math.max(0, total - paidAmount);
   const change = Math.max(0, paidAmount - total);
+  const canConfirm =
+    selectedCount > 0 &&
+    total > 0 &&
+    (saleType === "presale_pickup" || paidAmount >= total) &&
+    !isSubmitting;
 
   const load = async () => {
-    const productsResponse = await fetch('/api/staff/register/products');
-    const productsJson = (await productsResponse.json()) as { ok: true; data: { items: Product[] } } | { ok: false; error: { message: string } };
-    if (productsJson.ok) setItems(productsJson.data.items);
-    if (!productsJson.ok) setMessage(productsJson.error.message);
+    setIsLoading(true);
+    try {
+      const productsResponse = await fetch("/api/staff/register/products");
+      const productsJson = (await productsResponse.json()) as
+        | { ok: true; data: { items: Product[] } }
+        | { ok: false; error: { message: string } };
+      if (!productsJson.ok) throw new Error(productsJson.error.message);
+      setItems(productsJson.data.items);
+      setMessage("");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "在庫を再読み込みできませんでした。",
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
     void load();
-    void fetch('/api/auth/me')
+    void fetch("/api/auth/me")
       .then(async (response) => {
         if (!response.ok) return null;
-        return (await response.json()) as { ok: true; data: { role: 'admin' | 'owner' } } | { ok: false };
+        return (await response.json()) as
+          | { ok: true; data: { role: "staff" | "admin" | "owner" } }
+          | { ok: false };
       })
       .then((json) => {
         if (json && json.ok) setRole(json.data.role);
       });
+    void fetch('/api/staff/register/current')
+      .then(async (response) => (await response.json()) as { ok: true; data: { registerId: number | null } } | { ok: false })
+      .then((json) => {
+        if (json.ok && json.data.registerId) setRegisterId(json.data.registerId);
+      });
   }, []);
 
-  const add = (id: string) => setSelected((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
-  const remove = (id: string) =>
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    phaseHeadingRef.current?.focus({ preventScroll: true });
+  }, [phase]);
+
+  const add = (id: string) => {
+    const item = items.find((entry) => entry.id === id);
+    if (
+      !item ||
+      !item.isActive ||
+      item.isSoldOut ||
+      (selected[id] ?? 0) >= item.currentStock
+    )
+      return;
+    setSelected((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
+    setSelectedOrder((current) => [
+      id,
+      ...current.filter((entry) => entry !== id),
+    ]);
+  };
+
+  const remove = (id: string) => {
     setSelected((current) => {
       const next = { ...current };
       const count = (next[id] ?? 0) - 1;
-      if (count <= 0) {
-        delete next[id];
-      } else {
-        next[id] = count;
-      }
+      if (count <= 0) delete next[id];
+      else next[id] = count;
       return next;
     });
-  const clear = () => setSelected({});
-  const clearPaidAmount = () => setPaidAmount(0);
-  const appendPaidDigit = (digit: number) => setPaidAmount((current) => current * 10 + digit);
-  const backspacePaidAmount = () => setPaidAmount((current) => Math.floor(current / 10));
-
-  const confirm = async () => {
-    const selectedItems = Object.entries(selected).flatMap(([productId, quantity]) => {
-      const product = items.find((entry) => entry.id === productId);
-      if (!product || quantity <= 0) return [];
-      return [
-        {
-          id: product.id,
-          displayName: product.displayName,
-          quantity,
-          unitPrice: product.price,
-          subtotal: product.price * quantity,
-        },
-      ];
-    });
-    const response = await fetch('/api/staff/register/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        idempotencyKey: crypto.randomUUID(),
-        saleType,
-        paymentMethod: saleType === 'normal' ? 'cash' : 'prepaid',
-        paidAmount,
-        items: Object.entries(selected).map(([productId, quantity]) => ({ productId, quantity })),
-      }),
-    });
-    const json = (await response.json()) as
-      | { ok: true; data: { saleId: string; totalAmount: number; paidAmount: number; changeAmount: number } }
-      | { ok: false; error: { message: string } };
-    if (!json.ok) {
-      setMessage(json.error.message);
-      return;
-    }
-    setReceipt({
-      saleId: json.data.saleId,
-      items: selectedItems,
-      totalAmount: json.data.totalAmount,
-      paidAmount: json.data.paidAmount,
-      changeAmount: json.data.changeAmount,
-    });
-    setMessage('');
-    setPhase('complete');
-    clear();
-    void load();
+    if ((selected[id] ?? 0) <= 1)
+      setSelectedOrder((order) => order.filter((entry) => entry !== id));
   };
 
-  const selectedCount = Object.keys(selected).length;
+  const deleteItem = (id: string) => {
+    setSelected((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setSelectedOrder((current) => current.filter((entry) => entry !== id));
+  };
+
+  const clear = () => {
+    setSelected({});
+    setSelectedOrder([]);
+  };
+
+  const resetCheckoutKey = () => {
+    idempotencyKeyRef.current = null;
+    submittingRef.current = false;
+  };
+
+  const startPayment = () => {
+    setPaidAmount(0);
+    setCheckoutError("");
+    resetCheckoutKey();
+    setPhase("pay");
+  };
+
+  const confirm = async () => {
+    if (!canConfirm || submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setCheckoutError("");
+    const idempotencyKey = idempotencyKeyRef.current ?? crypto.randomUUID();
+    idempotencyKeyRef.current = idempotencyKey;
+    const selectedItems = selectedEntries.map(({ item, quantity }) => ({
+      id: item.id,
+      displayName: item.displayName,
+      quantity,
+      unitPrice: item.price,
+      subtotal: item.price * quantity,
+    }));
+
+    try {
+      const response = await fetch("/api/staff/register/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey,
+          saleType,
+          paymentMethod: saleType === "normal" ? "cash" : "prepaid",
+          paidAmount: saleType === "normal" ? paidAmount : 0,
+          items: selectedEntries.map(({ item, quantity }) => ({
+            productId: item.id,
+            quantity,
+          })),
+        }),
+      });
+      const json = await readApiResponse<
+        | {
+            ok: true;
+            data: {
+              saleId: string;
+              totalAmount: number;
+              paidAmount: number;
+              changeAmount: number;
+              pickupCode: string;
+              registerId: number;
+              stationId: number;
+            };
+          }
+        | { ok: false; error: { message: string } }
+      >(response);
+      if (!json.ok) throw new Error(json.error.message);
+      setReceipt({
+        saleId: json.data.saleId,
+        items: selectedItems,
+        totalAmount: json.data.totalAmount,
+        paidAmount: json.data.paidAmount,
+        changeAmount: json.data.changeAmount,
+        pickupCode: json.data.pickupCode,
+        registerId: json.data.registerId,
+        stationId: json.data.stationId,
+      });
+      setPhase("complete");
+      clear();
+      void load();
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error ? error.message : "通信に失敗しました。",
+      );
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const nextCheckout = () => {
+    clear();
+    setPaidAmount(0);
+    setSaleType("normal");
+    setReceipt(null);
+    setCheckoutError("");
+    resetCheckoutKey();
+    setPhase("select");
+  };
+
+  const cancelReceipt = async () => {
+    if (
+      !receipt ||
+      isCanceling ||
+      !window.confirm("この会計を取り消し、在庫を戻します。よろしいですか？")
+    )
+      return;
+    setIsCanceling(true);
+    setCheckoutError("");
+    try {
+      const response = await fetch(
+        `/api/sales/${encodeURIComponent(receipt.saleId)}/cancel`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restoreStock: true }) },
+      );
+      const json = (await response.json()) as
+        | { ok: true }
+        | { ok: false; error: { message: string } };
+      if (!json.ok) throw new Error(json.error.message);
+      await load();
+      nextCheckout();
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error ? error.message : "会計を取り消せませんでした。",
+      );
+    } finally {
+      setIsCanceling(false);
+    }
+  };
 
   return (
-    <main className="page page-register">
+    <main className={`page page-register register-mode-${saleType}`}>
       <section className="register-shell">
-        <header className="register-hero">
-          <div>
-            <p className="eyebrow">Register Desk</p>
-            <h1>レジ</h1>
-            {role === 'admin' ? (
-              <p className="register-subtitle">
-                <a href="/admin">販売履歴と設定へ</a>
-              </p>
-            ) : null}
+        <header className="register-topbar">
+          <div className="register-brand">
+            <strong>レジ{registerId}</strong>
+            <span className="register-current-mode">
+              {saleType === "normal" ? "通常販売" : "事前販売"}
+            </span>
           </div>
-          <div className="register-total">
-            <span>現在の合計</span>
-            <strong>{formatYen(total)}</strong>
+          <span className="register-station-label">受取{registerId} / 色紙 {['赤', '青', '緑', '水色'][registerId - 1]}</span>
+          <div
+            className="register-mode-switch"
+            aria-label="販売モードを切り替える"
+          >
+            <button
+              type="button"
+              onClick={() => setSaleType("normal")}
+              aria-pressed={saleType === "normal"}
+              disabled={phase !== "select"}
+            >
+              通常
+            </button>
+            <button
+              type="button"
+              onClick={() => setSaleType("presale_pickup")}
+              aria-pressed={saleType === "presale_pickup"}
+              disabled={phase !== "select"}
+            >
+              事前販売
+            </button>
           </div>
+          {role === "admin" || role === "owner" ? (
+            <a href="/admin">管理画面へ</a>
+          ) : null}
         </header>
 
         {message ? <p className="error register-message">{message}</p> : null}
 
-        {phase === 'select' ? (
+        {phase === "select" ? (
           <section className="register-select">
             <div className="register-panel register-products">
               <div className="section-head">
-                <h2>商品を選ぶ</h2>
+                <h2 ref={phaseHeadingRef} tabIndex={-1}>
+                  商品を選ぶ
+                </h2>
               </div>
-              <div className="product-list">
-                {items.map((item) => (
+              <nav
+                className="register-category-tabs"
+                aria-label="カテゴリを切り替える"
+              >
+                {CATEGORIES.map((category) => (
                   <button
-                    key={item.id}
-                    className={`product-row${(selected[item.id] ?? 0) > 0 ? ' product-row-selected' : ''}`}
-                    disabled={!item.isActive || item.isSoldOut}
-                    onClick={() => add(item.id)}
+                    key={category}
+                    type="button"
+                    className={
+                      selectedCategory === category
+                        ? "register-category-tab is-active"
+                        : "register-category-tab"
+                    }
+                    onClick={() => setSelectedCategory(category)}
+                    aria-pressed={selectedCategory === category}
                   >
-                    <div className="product-row-main">
-                      <div className="product-row-title">
-                        <strong>{item.displayName}</strong>
-                        <span className="product-row-price">{formatYen(item.price)}</span>
-                      </div>
+                    {getCategoryLabel(category)}
+                  </button>
+                ))}
+              </nav>
+              <div className="product-list">
+                {visibleItems.map((item) => {
+                  const quantity = selected[item.id] ?? 0;
+                  const disabled = !item.isActive || item.isSoldOut;
+                  const productCategory = normalizeCategory(item);
+                  const categoryClass =
+                    productCategory === "おにぎり"
+                      ? "is-category-onigiri"
+                      : productCategory === "サイドメニュー"
+                        ? "is-category-side"
+                        : "is-category-drink";
+                  const badge = !item.isActive
+                    ? "停止中"
+                    : item.isSoldOut
+                      ? "売り切れ"
+                      : item.statusLevel <= 0
+                        ? "残り少なめ"
+                        : "";
+                  return (
+                    <article
+                      key={item.id}
+                      className={`product-row ${categoryClass}${quantity > 0 ? " product-row-selected" : ""}${disabled ? " is-disabled" : ""}`}
+                    >
+                      <button
+                        type="button"
+                        className="product-main-button"
+                        disabled={disabled || quantity >= item.currentStock}
+                        onClick={() => add(item.id)}
+                        aria-label={`${item.displayName} を 1 個追加する`}
+                      >
+                        <span className="product-row-title">
+                          <strong>{item.displayName}</strong>
+                          <span className="product-row-price">
+                            {formatYen(item.price)}
+                          </span>
+                        </span>
+                        <span className="product-row-meta">
+                          <span className="product-count">{quantity} 点</span>
+                          {badge ? (
+                            <span
+                              className={`stock-badge ${!item.isActive ? "is-stopped" : item.isSoldOut ? "is-soldout" : "is-low"}`}
+                            >
+                              {badge}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
                       <div className="product-row-actions">
                         <button
                           type="button"
                           className="product-mini-button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            remove(item.id);
-                          }}
-                          disabled={(selected[item.id] ?? 0) <= 0}
-                          aria-label={`${item.displayName} を 1 個減らす`}
-                        >
-                          −
-                        </button>
-                        <button
-                          type="button"
-                          className="product-mini-button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            add(item.id);
-                          }}
+                          onClick={() => add(item.id)}
+                          disabled={disabled || quantity >= item.currentStock}
                           aria-label={`${item.displayName} を 1 個追加する`}
                         >
                           ＋
                         </button>
+                        <button
+                          type="button"
+                          className="product-mini-button"
+                          onClick={() => remove(item.id)}
+                          disabled={quantity <= 0}
+                          aria-label={`${item.displayName} を 1 個減らす`}
+                        >
+                          −
+                        </button>
                       </div>
-                    </div>
-                    <div className="product-row-meta">
-                      <span className="product-count">{selected[item.id] ?? 0} 点</span>
-                    </div>
-                  </button>
-                ))}
+                    </article>
+                  );
+                })}
+                {!visibleItems.length ? (
+                  <p className="register-empty-category">
+                    {getCategoryLabel(selectedCategory)}の商品はありません。
+                  </p>
+                ) : null}
               </div>
-              <div className="toolbar register-actions">
-                <button onClick={clear}>選択を空にする</button>
+              <div className="register-product-utilities">
                 <button
-                  className="primary-action"
-                  onClick={() => {
-                    setPaidAmount(0);
-                    setPhase('pay');
-                  }}
-                  disabled={!selectedCount || total <= 0}
+                  type="button"
+                  className="register-minor-action"
+                  onClick={() => void load()}
+                  disabled={isLoading}
                 >
-                  会計へ進む
+                  {isLoading ? "在庫を読み込み中…" : "在庫を再読み込み"}
                 </button>
               </div>
             </div>
@@ -209,25 +482,6 @@ export function RegisterPage() {
               <div className="section-head">
                 <h2 className="cart-title">選択中</h2>
               </div>
-              <div className="cart">
-                {selectedCount ? (
-                  Object.entries(selected).map(([id, quantity]) => {
-                    const item = items.find((entry) => entry.id === id);
-                    if (!item) return null;
-                    return (
-                      <div key={id} className="cart-row">
-                        <div className="cart-main">
-                          <strong>{item.displayName}</strong>
-                          <span>{quantity}点</span>
-                        </div>
-                        <div className="cart-price">{formatYen(item.price * quantity)}</div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p>商品を選んでください。</p>
-                )}
-              </div>
               <div className="register-summary">
                 <div>
                   <span className="summary-label">合計</span>
@@ -235,160 +489,301 @@ export function RegisterPage() {
                 </div>
                 <div>
                   <span className="summary-label">個数</span>
-                  <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)}</strong>
+                  <strong>{selectedCount}</strong>
                 </div>
+              </div>
+              <div className="cart">
+                {selectedEntries.length ? (
+                  selectedEntries.map(({ item, quantity }) => (
+                    <div key={item.id} className="cart-row">
+                      <div className="cart-main">
+                        <strong>{item.displayName}</strong>
+                        <span>{formatYen(item.price * quantity)}</span>
+                      </div>
+                      <div className="cart-actions">
+                        <button
+                          type="button"
+                          onClick={() => remove(item.id)}
+                          aria-label={`${item.displayName} を 1 個減らす`}
+                        >
+                          −
+                        </button>
+                        <strong>{quantity}</strong>
+                        <button
+                          type="button"
+                          onClick={() => add(item.id)}
+                          disabled={quantity >= item.currentStock}
+                          aria-label={`${item.displayName} を 1 個追加する`}
+                        >
+                          ＋
+                        </button>
+                        <button
+                          type="button"
+                          className="cart-delete"
+                          onClick={() => deleteItem(item.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p>商品を選んでください。</p>
+                )}
+              </div>
+              <div className="register-cart-footer">
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={startPayment}
+                  disabled={!selectedCount || total <= 0}
+                >
+                  {saleType === "normal" ? "会計へ進む" : "受け渡し確認へ"}
+                </button>
+                <button
+                  type="button"
+                  className="register-minor-action"
+                  onClick={clear}
+                  disabled={!selectedCount}
+                >
+                  選択を空にする
+                </button>
               </div>
             </aside>
           </section>
-        ) : phase === 'pay' ? (
+        ) : phase === "pay" ? (
           <section className="register-pay">
             <div className="register-panel register-confirm register-pay-left">
               <div className="section-head">
-                <h2>会計</h2>
+                <h2 ref={phaseHeadingRef} tabIndex={-1}>
+                  {saleType === "normal" ? "お会計" : "受け渡し確認"}
+                </h2>
               </div>
-              <div className="register-detail-head">
-                <div>
-                  <span>商品明細</span>
-                  <strong>{Object.values(selected).reduce((sum, qty) => sum + qty, 0)} 点</strong>
-                </div>
-                <div>
-                  <span>会計合計</span>
+              <div className="checkout-overview">
+                <div className="checkout-total">
+                  <span>
+                    {saleType === "normal"
+                      ? "今回のお会計"
+                      : "受け渡し商品の合計"}
+                  </span>
                   <strong>{formatYen(total)}</strong>
+                  <small>{selectedCount}点</small>
                 </div>
+                {saleType === "normal" ? (
+                  <>
+                    <div className="checkout-paid">
+                      <span>受け取った金額</span>
+                      <strong>{formatYen(paidAmount)}</strong>
+                    </div>
+                    <div
+                      className={
+                        shortage > 0
+                          ? "checkout-guidance is-short"
+                          : "checkout-guidance is-ready"
+                      }
+                    >
+                      <strong>
+                        {shortage > 0
+                          ? `あと${formatYen(shortage)}`
+                          : `おつり ${formatYen(change)}`}
+                      </strong>
+                      <span>
+                        {shortage > 0
+                          ? "受け取ってください"
+                          : "お返ししてください"}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="checkout-guidance is-presale">
+                    <strong>事前支払い済み</strong>
+                    <span>商品を確認して受け渡しを確定してください</span>
+                  </div>
+                )}
               </div>
-              <div className="receipt receipt-inline">
-                <div className="receipt-items">
-                  {Object.entries(selected).map(([id, quantity]) => {
-                    const item = items.find((entry) => entry.id === id);
-                    if (!item) return null;
-                    return (
-                      <div key={id} className="receipt-item">
+              <details className="checkout-items">
+                <summary>商品明細を見る（{selectedCount}点）</summary>
+                <div className="receipt receipt-inline">
+                  <div className="receipt-items">
+                    {selectedEntries.map(({ item, quantity }) => (
+                      <div key={item.id} className="receipt-item">
                         <div>
                           <strong>{item.displayName}</strong>
                           <span>
-                            {quantity} 個で {formatYen(item.price * quantity)}
+                            {formatYen(item.price)} × {quantity}
                           </span>
                         </div>
-                        <strong className="receipt-item-total">{formatYen(item.price * quantity)}</strong>
+                        <strong>{formatYen(item.price * quantity)}</strong>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="confirm-summary">
-                <p><span className="payment-label">合計</span><strong>{formatYen(total)}</strong></p>
-                <p><span className="payment-label">預かり</span><strong>{formatYen(paidAmount)}</strong></p>
-                <p><span className="payment-label">おつり</span><strong>{formatYen(change)}</strong></p>
-              </div>
+              </details>
             </div>
             <div className="register-panel register-pay-right">
-              <div className="payment-box">
-                <label>
-                  <span className="payment-label">預かり金額</span>
-                  <input type="text" inputMode="numeric" value={formatYen(paidAmount)} readOnly aria-label="預かり金額" />
-                </label>
-                <div className="numpad">
-                  <button onClick={clearPaidAmount}>C</button>
-                  <button onClick={backspacePaidAmount}>⌫</button>
-                  <button onClick={() => setPaidAmount((current) => current * 100)}>00</button>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
-                    <button key={digit} onClick={() => appendPaidDigit(digit)}>
-                      {digit}
+              {saleType === "normal" ? (
+                <div className="payment-box">
+                  <label>
+                    <span className="payment-label">受け取った金額を入力</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={formatYen(paidAmount)}
+                      readOnly
+                      aria-label="預かり金額"
+                    />
+                  </label>
+                  <div className="payment-shortcuts">
+                    <button type="button" onClick={() => setPaidAmount(total)}>
+                      ちょうど
                     </button>
-                  ))}
-                  <button className="numpad-zero" onClick={() => appendPaidDigit(0)}>
-                    0
+                    {[1000, 5000, 10000].map((amount) => (
+                      <button
+                        type="button"
+                        key={amount}
+                        onClick={() => setPaidAmount(amount)}
+                      >
+                        {formatYen(amount)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="numpad">
+                    {[7, 8, 9, 4, 5, 6, 1, 2, 3].map((digit) => (
+                      <button
+                        type="button"
+                        key={digit}
+                        onClick={() =>
+                          setPaidAmount((current) => current * 10 + digit)
+                        }
+                      >
+                        {digit}
+                      </button>
+                    ))}
+                    <button type="button" onClick={() => setPaidAmount(0)}>
+                      C
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaidAmount((current) => current * 10)}
+                    >
+                      0
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPaidAmount((current) => Math.floor(current / 10))
+                      }
+                    >
+                      ⌫
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {checkoutError ? (
+                <div className="checkout-error" role="alert">
+                  <strong>確定できませんでした</strong>
+                  <span>{checkoutError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void confirm()}
+                    disabled={isSubmitting}
+                  >
+                    もう一度試す
                   </button>
                 </div>
-              </div>
+              ) : null}
               <div className="toolbar register-actions">
                 <button
+                  type="button"
                   onClick={() => {
-                    setPaidAmount(0);
-                    setPhase('select');
+                    setCheckoutError("");
+                    resetCheckoutKey();
+                    setPhase("select");
                   }}
+                  disabled={isSubmitting}
                 >
                   商品選択へ戻る
                 </button>
-                <button className="primary-action" onClick={confirm} disabled={!selectedCount || total <= 0}>
-                  お会計確定
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={() => void confirm()}
+                  disabled={!canConfirm}
+                >
+                  {isSubmitting
+                    ? "確定中…"
+                    : saleType === "normal"
+                      ? "お会計確定"
+                      : "受け渡し確定"}
                 </button>
               </div>
             </div>
           </section>
         ) : (
           <section className="register-panel register-complete">
-            <h2>会計が完了しました</h2>
+            <h2 ref={phaseHeadingRef} tabIndex={-1}>
+              {saleType === "normal"
+                ? "会計が完了しました"
+                : "受け渡しを記録しました"}
+            </h2>
             {receipt ? (
-              <div className="receipt">
-                <div className="receipt-meta">
-                  <p>
-                    <span>合計</span>
-                    <strong>{formatYen(receipt.totalAmount)}</strong>
-                  </p>
-                  <p>
-                    <span>預かり</span>
-                    <strong>{formatYen(receipt.paidAmount)}</strong>
-                  </p>
-                  <p>
-                    <span>おつり</span>
-                    <strong>{formatYen(receipt.changeAmount)}</strong>
-                  </p>
+              <>
+                <p className="complete-instruction">
+                  {saleType === "normal"
+                    ? receipt.changeAmount > 0
+                      ? <><span>おつりは</span> <strong>{formatYen(receipt.changeAmount)}</strong> <span>です。</span></>
+                      : "おつりはありません"
+                    : "商品をお渡しください"}
+                </p>
+                <div className="receipt">
+                  <div className="receipt-order-code">
+                    <span>注文番号</span>
+                    <strong>{receipt.pickupCode}</strong>
+                  </div>
+                  <div className="receipt-meta">
+                    <p>
+                      <span>合計</span>
+                      <strong>{formatYen(receipt.totalAmount)}</strong>
+                    </p>
+                    {saleType === "normal" ? (
+                      <>
+                        <p>
+                          <span>預かり</span>
+                          <strong>{formatYen(receipt.paidAmount)}</strong>
+                        </p>
+                        <p>
+                          <span>おつり</span>
+                          <strong>{formatYen(receipt.changeAmount)}</strong>
+                        </p>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="receipt-items">
-                  {receipt.items.map((item) => (
-                    <div key={item.id} className="receipt-item">
-                      <div>
-                        <strong>{item.displayName}</strong>
-                        <span>
-                          {formatYen(item.unitPrice)} × {item.quantity}
-                        </span>
-                      </div>
-                      <strong>{formatYen(item.subtotal)}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              </>
             ) : null}
-            <div className="toolbar">
+            {checkoutError ? <p className="error">{checkoutError}</p> : null}
+            <div className="toolbar complete-actions">
               <button
-                onClick={() => {
-                  clear();
-                  setPaidAmount(0);
-                  setSaleType('normal');
-                  setPhase('select');
-                }}
+                type="button"
+                className="primary-action"
+                onClick={nextCheckout}
               >
                 次の会計へ
               </button>
-              <button
-                onClick={() => {
-                  clear();
-                  setPaidAmount(0);
-                  setSaleType('normal');
-                }}
-              >
-                会計内容をリセット
-              </button>
+              {(role === "staff" || role === "admin" || role === "owner") && receipt ? (
+                <button
+                  type="button"
+                  className="danger-secondary"
+                  onClick={() => void cancelReceipt()}
+                  disabled={isCanceling}
+                >
+                  {isCanceling ? "取消中…" : "この会計を取り消す"}
+                </button>
+              ) : null}
+              <a href="/staff/register/recent-sales">最近の会計</a>
             </div>
           </section>
         )}
-
-        <section className="register-panel register-advanced">
-          <details>
-            <summary>販売種別と運用操作</summary>
-            <div className="register-advanced-body">
-              <div className="toolbar register-sale-type">
-                <button onClick={() => setSaleType('normal')} aria-pressed={saleType === 'normal'}>
-                  通常販売
-                </button>
-                <button onClick={() => setSaleType('presale_pickup')} aria-pressed={saleType === 'presale_pickup'}>
-                  事前販売
-                </button>
-              </div>
-            </div>
-          </details>
-        </section>
       </section>
     </main>
   );

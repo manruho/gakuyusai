@@ -22,7 +22,7 @@ type StockEventRow = {
   quantity_delta: number;
   related_sale_id: string | null;
   reason: string;
-  created_by_role: 'admin' | 'owner';
+  created_by_role: 'staff' | 'admin' | 'owner';
   created_at: string;
 };
 
@@ -35,9 +35,10 @@ type SaleRow = {
   change_amount: number;
   payment_method: 'cash' | 'prepaid';
   status: 'completed' | 'canceled';
-  created_by_role: 'admin' | 'owner';
+  created_by_role: 'staff' | 'admin' | 'owner';
   created_at: string;
   canceled_at: string | null;
+  register_id: number;
 };
 
 export async function listStock(db: D1Database): Promise<ProductRow[]> {
@@ -46,6 +47,7 @@ export async function listStock(db: D1Database): Promise<ProductRow[]> {
       `SELECT p.id, p.display_name, i.current_stock, p.initial_stock
        FROM products p
        JOIN product_inventory i ON i.product_id = p.id
+       WHERE p.deleted_at IS NULL
        ORDER BY p.sort_order ASC, p.created_at ASC`,
     )
     .all();
@@ -112,17 +114,19 @@ export async function recordStockEvent(
 
 export async function cancelSale(
   db: D1Database,
-  role: 'admin' | 'owner',
+  role: 'staff' | 'admin' | 'owner',
   saleId: string,
+  username = 'system',
+  registerId?: 1 | 2 | 3 | 4,
+  options: { reason?: string; restoreStock?: boolean } = {},
 ): Promise<
-  | { ok: true; canceledAt: string }
-  | { ok: false; status: 404; code: 'NOT_FOUND'; message: string }
-  | { ok: false; status: 409; code: 'ALREADY_CANCELED'; message: string }
+  | { ok: true; canceledAt: string; restoreStock: boolean }
+  | { ok: false; status: 403 | 404 | 409; code: 'FORBIDDEN_REGISTER' | 'NOT_FOUND' | 'ALREADY_CANCELED' | 'INVALID_RESTORE'; message: string }
 > {
   const saleRows = await db
     .prepare(
       `SELECT id, idempotency_key, sale_type, total_amount, paid_amount, change_amount,
-              payment_method, status, created_by_role, created_at, canceled_at
+              payment_method, status, created_by_role, created_at, canceled_at, register_id
        FROM sales WHERE id = ?`,
     )
     .bind(saleId)
@@ -134,22 +138,40 @@ export async function cancelSale(
   if (sale.status === 'canceled') {
     return { ok: false, status: 409, code: 'ALREADY_CANCELED', message: 'この販売はすでに取り消されています。' };
   }
+  if (role === 'staff' && (!registerId || sale.register_id !== registerId)) {
+    return { ok: false, status: 403, code: 'FORBIDDEN_REGISTER', message: '現在選択中のレジの販売だけを取り消せます。' };
+  }
+  const fulfillmentRows = await db.prepare(
+    `SELECT id, status FROM fulfillment_orders WHERE sale_id = ?`,
+  ).bind(saleId).all<{ id: string; status: 'pending' | 'delivered' | 'canceled' }>();
+  const fulfillment = (fulfillmentRows.results ?? [])[0];
+  const restoreStock = fulfillment?.status === 'delivered' ? options.restoreStock === true : true;
+  if (fulfillment?.status === 'delivered' && options.restoreStock === undefined) {
+    return { ok: false, status: 409, code: 'INVALID_RESTORE', message: '受渡済み注文は在庫を戻すか選択してください。' };
+  }
   const items = await db
     .prepare(`SELECT sale_id, product_id, quantity FROM sale_items WHERE sale_id = ?`)
     .bind(saleId)
     .all<{ sale_id: string; product_id: string; quantity: number }>();
   const now = new Date().toISOString();
   await db.batch([
-    db.prepare(`UPDATE sales SET status = 'canceled', canceled_at = ? WHERE id = ?`).bind(now, saleId),
-    ...((items.results ?? []) as Array<{ sale_id: string; product_id: string; quantity: number }>).flatMap((item) => [
+    db.prepare(`UPDATE sales SET status = 'canceled', canceled_at = ?, cancel_reason = ?, cancel_restore_stock = ?, canceled_by_username = ? WHERE id = ?`).bind(now, options.reason ?? '', restoreStock ? 1 : 0, username, saleId),
+    ...(restoreStock ? ((items.results ?? []) as Array<{ sale_id: string; product_id: string; quantity: number }>).flatMap((item) => [
       db.prepare(
         `UPDATE product_inventory SET current_stock = current_stock + ?, updated_at = ? WHERE product_id = ?`,
       ).bind(item.quantity, now, item.product_id),
       db.prepare(
         `INSERT INTO stock_events (id, product_id, event_type, quantity_delta, related_sale_id, reason, created_by_role, created_at)
          VALUES (?, ?, 'cancel', ?, ?, ?, ?, ?)`,
-      ).bind(createId('stock_event'), item.product_id, item.quantity, saleId, '販売取消', role, now),
-    ]),
+      ).bind(createId('stock_event'), item.product_id, item.quantity, saleId, options.reason ?? '販売取消', role, now),
+    ]) : []),
+    ...(fulfillment ? [
+      db.prepare(`UPDATE fulfillment_orders SET status = 'canceled', canceled_at = ?, updated_at = ? WHERE id = ?`).bind(now, now, fulfillment.id),
+      db.prepare(
+        `INSERT INTO fulfillment_events (id, fulfillment_order_id, event_type, from_status, to_status, actor_role, actor_username, reason, metadata_json, created_at)
+         VALUES (?, ?, 'canceled', ?, 'canceled', ?, ?, ?, ?, ?)`,
+      ).bind(createId('fulfillment_event'), fulfillment.id, fulfillment.status, role, username, options.reason ?? '', JSON.stringify({ restoreStock }), now),
+    ] : []),
   ]);
-  return { ok: true, canceledAt: now };
+  return { ok: true, canceledAt: now, restoreStock };
 }

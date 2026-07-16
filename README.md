@@ -54,10 +54,20 @@ Cloudflare へ反映する場合は、`pages secret put` と `wrangler d1 execut
 - `/` 公開ページ
 - `/login` スタッフログイン
 - `/staff/register` レジ
+- `/staff/register/select` レジ番号選択
+- `/staff/register/recent-sales` レジ別の最近の会計
 - `/staff/stock` 在庫管理
+- `/pickup` 受取窓口
 - `/admin` 管理画面
 
 ## API
 
 - `GET /api/public/status`
 - `POST /api/auth/login`
+- `GET /api/pickup/orders`
+- `POST /api/pickup/orders/:orderId/deliver`
+- `POST /api/pickup/orders/:orderId/restore`
+- `POST /api/pickup/orders/:orderId/ack-cancel`
+- `GET /api/pickup/live`（WebSocket。切断時は60秒ごとのD1同期で復元）
+
+受取連携の詳細仕様は [oder_spec.md](./oder_spec.md)、プロジェクト全体の仕様は [SPECIFICATION.md](./SPECIFICATION.md) を参照してください。

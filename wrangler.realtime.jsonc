@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gakuyusai-realtime",
+  "main": "worker/realtimeWorker.ts",
+  "compatibility_date": "2026-05-30",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REALTIME_HUB",
+        "class_name": "RealtimeHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RealtimeHub"]
+    }
+  ]
+}

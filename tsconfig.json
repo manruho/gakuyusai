@@ -13,5 +13,5 @@
     "strict": true,
     "types": ["@cloudflare/vite-plugin"]
   },
-  "include": ["src", "functions", "worker", "tests", "vite.config.ts"]
+  "include": ["src", "functions", "worker", "tests", "vite.config.ts", "worker-configuration.d.ts"]
 }

@@ -14,7 +14,7 @@ type SaleRow = {
   change_amount: number;
   payment_method: 'cash' | 'prepaid';
   status: 'completed' | 'canceled';
-  created_by_role: 'admin' | 'owner';
+  created_by_role: 'staff' | 'admin' | 'owner';
   created_at: string;
   canceled_at: string | null;
   items: SaleItemRow[];
@@ -28,7 +28,7 @@ type StockEventRow = {
   quantity_delta: number;
   related_sale_id: string | null;
   reason: string;
-  created_by_role: 'admin' | 'owner';
+  created_by_role: 'staff' | 'admin' | 'owner';
   created_at: string;
 };
 

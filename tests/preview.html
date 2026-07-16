@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文化祭おにぎり屋台 プレビュー</title>
+  <style>
+    :root {
+      --rice-bg: #fff7e6;
+      --rice-card: #fffdf7;
+      --nori: #20352b;
+      --nori-soft: #2f4a3b;
+      --ume: #e96b7a;
+      --salmon: #f59b68;
+      --soy: #8b5e3c;
+      --festival-red: #ef4444;
+      --festival-yellow: #facc15;
+      --text-main: #3f2f24;
+      --text-muted: #7a6a5c;
+      --shadow-soft: 0 16px 36px rgba(80, 50, 20, 0.14);
+      --shadow-button: 0 8px 0 rgba(32, 53, 43, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text-main);
+      font-family:
+        "Hiragino Maru Gothic ProN",
+        "Yu Gothic",
+        "Noto Sans JP",
+        system-ui,
+        sans-serif;
+      background:
+        radial-gradient(circle at 16px 16px, rgba(255, 255, 255, 0.88) 0 2px, transparent 3px),
+        radial-gradient(circle at 80% 10%, rgba(239, 68, 68, 0.11), transparent 28%),
+        radial-gradient(circle at 15% 90%, rgba(250, 204, 21, 0.18), transparent 30%),
+        linear-gradient(180deg, #fff2d6 0%, #fffaf0 48%, #fff7e6 100%);
+      background-size: 34px 34px, auto, auto, auto;
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 18px 14px 34px;
+    }
+
+    .phone-frame {
+      max-width: 430px;
+      margin: 0 auto;
+    }
+
+    .festival-header {
+      position: relative;
+      padding: 22px 18px 18px;
+      border: 3px solid var(--nori);
+      border-radius: 30px;
+      background: rgba(255, 253, 247, 0.96);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+
+    .festival-header::before {
+      content: "本日限定";
+      position: absolute;
+      top: 14px;
+      right: -34px;
+      padding: 6px 44px;
+      color: white;
+      font-size: 13px;
+      font-weight: 900;
+      background: var(--festival-red);
+      transform: rotate(18deg);
+      letter-spacing: 0.08em;
+    }
+
+    .festival-title {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      margin: 0;
+      font-size: clamp(27px, 8vw, 38px);
+      font-weight: 950;
+      letter-spacing: 0.04em;
+      line-height: 1.08;
+    }
+
+    .title-text small {
+      display: block;
+      margin-top: 5px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .onigiri-mark {
+      position: relative;
+      width: 62px;
+      height: 54px;
+      flex: 0 0 auto;
+      background: #fff;
+      border: 3px solid var(--nori);
+      border-radius: 48% 48% 42% 42%;
+      transform: rotate(45deg);
+      box-shadow: inset -5px -5px 0 rgba(0, 0, 0, 0.045);
+    }
+
+    .onigiri-mark::before {
+      content: "";
+      position: absolute;
+      right: 7px;
+      bottom: 7px;
+      width: 24px;
+      height: 29px;
+      border-radius: 7px;
+      background: var(--nori);
+    }
+
+    .onigiri-mark::after {
+      content: "";
+      position: absolute;
+      top: 12px;
+      left: 13px;
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: #d8d0c0;
+      box-shadow:
+        13px 4px 0 #d8d0c0,
+        5px 17px 0 #d8d0c0;
+    }
+
+    .notice-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .notice {
+      padding: 12px;
+      border: 2px dashed rgba(139, 94, 60, 0.35);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .notice strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 18px;
+      font-weight: 950;
+    }
+
+    .notice span {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 20px 2px 10px;
+      font-size: 18px;
+      font-weight: 950;
+    }
+
+    .section-title .ticket {
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: white;
+      background: var(--soy);
+      font-size: 12px;
+      letter-spacing: 0.03em;
+    }
+
+    .menu-list {
+      display: grid;
+      gap: 13px;
+    }
+
+    .menu-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: 74px 1fr;
+      gap: 14px;
+      align-items: center;
+      padding: 17px;
+      border: 2px solid rgba(32, 53, 43, 0.16);
+      border-radius: 26px;
+      background: rgba(255, 253, 247, 0.96);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .menu-card::before {
+      content: "";
+      position: absolute;
+      top: -9px;
+      left: 24px;
+      width: 74px;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(250, 204, 21, 0.68);
+      transform: rotate(-4deg);
+    }
+
+    .mini-onigiri {
+      position: relative;
+      width: 66px;
+      height: 58px;
+      margin: 4px auto 0;
+      border: 3px solid var(--nori);
+      border-radius: 48% 48% 42% 42%;
+      background: white;
+      transform: rotate(45deg);
+      box-shadow: inset -4px -4px 0 rgba(0, 0, 0, 0.045);
+    }
+
+    .mini-onigiri::before {
+      content: "";
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 23px;
+      height: 29px;
+      border-radius: 6px;
+      background: var(--nori);
+    }
+
+    .mini-onigiri.ume::after,
+    .mini-onigiri.salmon::after,
+    .mini-onigiri.kombu::after {
+      content: "";
+      position: absolute;
+      top: 13px;
+      left: 13px;
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+      transform: rotate(-45deg);
+    }
+
+    .mini-onigiri.ume::after {
+      background: var(--ume);
+    }
+
+    .mini-onigiri.salmon::after {
+      background: var(--salmon);
+    }
+
+    .mini-onigiri.kombu::after {
+      background: var(--nori-soft);
+    }
+
+    .menu-name {
+      margin: 0 0 4px;
+      font-size: 21px;
+      font-weight: 950;
+      letter-spacing: 0.02em;
+    }
+
+    .menu-meta {
+      margin: 0 0 10px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    .menu-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .price {
+      font-size: 20px;
+      font-weight: 950;
+    }
+
+    .stock-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      background: #ecfccb;
+      color: #3f6212;
+    }
+
+    .stock-pill.low {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .stock-pill.soldout {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .order-panel {
+      margin-top: 16px;
+      padding: 16px;
+      border: 2px solid rgba(32, 53, 43, 0.13);
+      border-radius: 26px;
+      background: rgba(255, 253, 247, 0.92);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .order-panel h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 950;
+    }
+
+    .order-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-top: 1px dashed rgba(139, 94, 60, 0.25);
+      font-weight: 800;
+    }
+
+    .order-row:first-of-type {
+      border-top: 0;
+    }
+
+    .primary-button {
+      width: 100%;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 18px;
+      padding: 15px 16px;
+      color: white;
+      font-size: 16px;
+      font-weight: 950;
+      background: linear-gradient(180deg, var(--nori-soft), var(--nori));
+      box-shadow: var(--shadow-button);
+      cursor: pointer;
+    }
+
+    .primary-button:active {
+      transform: translateY(3px);
+      box-shadow: 0 5px 0 rgba(32, 53, 43, 0.18);
+    }
+
+    .footer-note {
+      margin: 18px 4px 0;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    @media (min-width: 760px) {
+      .phone-frame {
+        max-width: 820px;
+      }
+
+      .menu-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .festival-header {
+        padding: 28px 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="phone-frame">
+      <header class="festival-header">
+        <h1 class="festival-title">
+          <span class="onigiri-mark" aria-hidden="true"></span>
+          <span class="title-text">
+            文化祭<br />おにぎり屋台
+            <small>販売状況とアレルギーをすぐ確認できます</small>
+          </span>
+        </h1>
+      </header>
+
+      <section class="notice-board" aria-label="販売情報">
+        <div class="notice">
+          <strong>12:40</strong>
+          <span>販売状況を更新しました</span>
+        </div>
+        <div class="notice">
+          <strong>現金のみ</strong>
+          <span>受け取り口でお支払いください</span>
+        </div>
+      </section>
+
+      <div class="section-title">
+        <span>今日のメニュー</span>
+        <span class="ticket">文化祭限定</span>
+      </div>
+
+      <section class="menu-list">
+        <article class="menu-card">
+          <div class="mini-onigiri ume" aria-hidden="true"></div>
+          <div>
+            <h2 class="menu-name">梅おにぎり</h2>
+            <p class="menu-meta">すっぱくて定番。アレルギー: なし</p>
+            <div class="menu-bottom">
+              <span class="price">¥150</span>
+              <span class="stock-pill">◎ まだあります</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="menu-card">
+          <div class="mini-onigiri salmon" aria-hidden="true"></div>
+          <div>
+            <h2 class="menu-name">鮭おにぎり</h2>
+            <p class="menu-meta">人気No.1。アレルギー: さけ・ごま</p>
+            <div class="menu-bottom">
+              <span class="price">¥180</span>
+              <span class="stock-pill low">△ 少なめ</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="menu-card">
+          <div class="mini-onigiri kombu" aria-hidden="true"></div>
+          <div>
+            <h2 class="menu-name">昆布おにぎり</h2>
+            <p class="menu-meta">甘じょっぱい定番味。アレルギー: 小麦・大豆</p>
+            <div class="menu-bottom">
+              <span class="price">¥160</span>
+              <span class="stock-pill">○ あります</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="menu-card">
+          <div class="mini-onigiri" aria-hidden="true"></div>
+          <div>
+            <h2 class="menu-name">ツナマヨ</h2>
+            <p class="menu-meta">まろやかで食べやすい。アレルギー: 卵</p>
+            <div class="menu-bottom">
+              <span class="price">¥180</span>
+              <span class="stock-pill soldout">× 売り切れ</span>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="order-panel">
+        <h2>注文メモ</h2>
+        <div class="order-row">
+          <span>選択中</span>
+          <span>梅 × 1 / 鮭 × 1</span>
+        </div>
+        <div class="order-row">
+          <span>合計</span>
+          <span>¥330</span>
+        </div>
+        <button class="primary-button">注文を確認する</button>
+      </section>
+
+      <p class="footer-note">
+        ※ これは雰囲気確認用の静的プレビューです。<br />
+        実際の在庫・注文処理とは接続していません。
+      </p>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,9 +1,14 @@
 import type { SessionPayload } from '../../src/lib/types';
 
-export function buildSessionPayload(role: 'admin' | 'owner', username: string): SessionPayload {
+export function buildSessionPayload(
+  role: 'staff' | 'pickup' | 'admin' | 'owner',
+  username: string,
+  context: { registerId?: 1 | 2 | 3 | 4; stationId?: 1 | 2 | 3 | 4 } = {},
+): SessionPayload {
   return {
     role,
     username,
+    ...context,
     exp: Date.now() + 12 * 60 * 60 * 1000,
   };
 }
@@ -17,28 +22,21 @@ type LoginThrottleState = {
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
 
+export function shouldBypassStaffAuth(env: { PREVIEW_AUTH_BYPASS?: string; CF_PAGES_BRANCH?: string }): boolean {
+  return env.PREVIEW_AUTH_BYPASS === 'true' && Boolean(env.CF_PAGES_BRANCH) && env.CF_PAGES_BRANCH !== 'main';
+}
+
 function getThrottleKey(username: string, ip: string | null): string {
   return `${username}:${ip ?? 'unknown'}`;
 }
 
-export async function getLoginThrottle(
-  db: D1Database,
-  username: string,
-  ip: string | null,
-): Promise<LoginThrottleState | null> {
+export async function getLoginThrottle(db: D1Database, username: string, ip: string | null): Promise<LoginThrottleState | null> {
   const key = getThrottleKey(username, ip);
-  const rows = await db
-    .prepare('SELECT failed_count as failedCount, locked_until as lockedUntil, updated_at as updatedAt FROM login_attempts WHERE throttle_key = ?')
-    .bind(key)
-    .all<LoginThrottleState>();
+  const rows = await db.prepare('SELECT failed_count as failedCount, locked_until as lockedUntil, updated_at as updatedAt FROM login_attempts WHERE throttle_key = ?').bind(key).all<LoginThrottleState>();
   return (rows.results ?? [])[0] ?? null;
 }
 
-export async function recordLoginFailure(
-  db: D1Database,
-  username: string,
-  ip: string | null,
-): Promise<{ lockedUntil: string | null }> {
+export async function recordLoginFailure(db: D1Database, username: string, ip: string | null): Promise<{ lockedUntil: string | null }> {
   const key = getThrottleKey(username, ip);
   const current = await getLoginThrottle(db, username, ip);
   const failedCount = (current?.failedCount ?? 0) + 1;
