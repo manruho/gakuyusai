@@ -54,7 +54,7 @@ export async function listFulfillmentOrders(
        JOIN sales s ON s.id = fo.sale_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY CASE WHEN fo.status = 'pending' THEN 0 WHEN fo.status = 'canceled' THEN 1 ELSE 2 END,
-                fo.created_at ASC
+                fo.created_at DESC
        LIMIT ?`,
     )
     .bind(...bindings, options.limit ?? 100)

@@ -18,22 +18,18 @@ export function PickupPage() {
   const [syncState, setSyncState] = useState<'同期中' | '同期済み' | 'エラー'>('同期中');
   const [stationId, setStationId] = useState<number | null>(null);
   const [newOrderIds, setNewOrderIds] = useState<Set<string>>(new Set());
-  const [checkedOrderIds, setCheckedOrderIds] = useState<Set<string>>(new Set());
-  const knownOrderIds = useRef<Set<string> | null>(null);
-  const checksLoaded = useRef(false);
-
-  useEffect(() => {
+  const [checkedOrderIds, setCheckedOrderIds] = useState<Set<string>>(() => {
     try {
       const saved = JSON.parse(window.localStorage.getItem('gakuyusai:pickup:checked-orders') ?? '[]') as unknown;
-      if (Array.isArray(saved)) setCheckedOrderIds(new Set(saved.filter((id): id is string => typeof id === 'string')));
+      return Array.isArray(saved) ? new Set(saved.filter((id): id is string => typeof id === 'string')) : new Set();
     } catch {
       // 保存済みチェックが壊れていても一覧表示は継続する。
+      return new Set();
     }
-    checksLoaded.current = true;
-  }, []);
+  });
+  const knownOrderIds = useRef<Set<string> | null>(null);
 
   useEffect(() => {
-    if (!checksLoaded.current) return;
     window.localStorage.setItem('gakuyusai:pickup:checked-orders', JSON.stringify([...checkedOrderIds]));
   }, [checkedOrderIds]);
 
@@ -131,7 +127,7 @@ export function PickupPage() {
           <div className="pickup-table-row pickup-table-head" aria-hidden="true"><span>No.</span><span>注文番号</span><span>商品・個数</span><span>受渡</span></div>
           {pending.map((order, index) => (
             <article className={`pickup-table-row${newOrderIds.has(order.id) ? ' is-new-order' : ''}`} key={order.id}>
-              <span className="pickup-row-no">{index + 1}</span>
+              <span className="pickup-row-no">{pending.length - index}</span>
               <strong className="pickup-row-code">{order.pickup_code}</strong>
               <div className="pickup-row-items">{order.items.map((item) => <span key={item.product_id}><span>{item.product_name}</span><strong>×{item.quantity}</strong></span>)}</div>
               <button type="button" className={`pickup-check-button${checkedOrderIds.has(order.id) ? ' is-checked' : ''}`} onClick={() => toggleCheck(order.id)} aria-label={`${order.pickup_code}のチェックを${checkedOrderIds.has(order.id) ? '外す' : '入れる'}`} aria-pressed={checkedOrderIds.has(order.id)}>{checkedOrderIds.has(order.id) ? '✓' : ''}</button>
