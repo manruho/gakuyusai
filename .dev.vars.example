@@ -1,7 +1,16 @@
+STAFF_USERNAME=staff
+STAFF_PASSWORD_HASH=replace_with_hash
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD_HASH=replace_with_hash
 OWNER_USERNAME=owner
 OWNER_PASSWORD_HASH=replace_with_hash
+PICKUP_1_USERNAME=pickup-1
+PICKUP_1_PASSWORD_HASH=replace_with_hash
+PICKUP_2_USERNAME=pickup-2
+PICKUP_2_PASSWORD_HASH=replace_with_hash
+PICKUP_3_USERNAME=pickup-3
+PICKUP_3_PASSWORD_HASH=replace_with_hash
+PICKUP_4_USERNAME=pickup-4
+PICKUP_4_PASSWORD_HASH=replace_with_hash
 SESSION_SECRET=replace_with_random_secret
 PUBLIC_SHOP_NAME=文化祭食品販売
-

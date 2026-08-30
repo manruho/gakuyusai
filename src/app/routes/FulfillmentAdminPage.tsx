@@ -17,7 +17,7 @@ export function FulfillmentAdminPage() {
   const [message, setMessage] = useState('');
   const load = async () => {
     const [ordersResponse, summaryResponse] = await Promise.all([
-      fetch('/api/admin/fulfillment/orders?limit=1000'),
+      fetch('/api/admin/fulfillment/orders?limit=100'),
       fetch('/api/admin/fulfillment/summary'),
     ]);
     const json = (await ordersResponse.json()) as { ok: true; data: { items: Order[] } } | { ok: false; error: { message: string } };
@@ -28,7 +28,11 @@ export function FulfillmentAdminPage() {
   useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 60_000); return () => window.clearInterval(timer); }, []);
   const pending = useMemo(() => orders.filter((order) => order.status === 'pending'), [orders]);
   const canceled = useMemo(() => orders.filter((order) => order.status === 'canceled' && !order.cancel_acknowledged_at), [orders]);
-  const oldest = pending[0] ? Math.max(0, Math.floor((Date.now() - Date.parse(pending[0].created_at)) / 60_000)) : 0;
+  const oldestCreatedAt = pending.reduce((oldest, order) => {
+    const createdAt = Date.parse(order.created_at);
+    return Number.isFinite(createdAt) && (oldest === null || createdAt < oldest) ? createdAt : oldest;
+  }, null as number | null);
+  const oldest = oldestCreatedAt === null ? 0 : Math.max(0, Math.floor((Date.now() - oldestCreatedAt) / 60_000));
   return (
     <main className="page page-admin">
       <section className="panel">

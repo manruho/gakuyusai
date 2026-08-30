@@ -8,6 +8,14 @@ describe('password', () => {
     await expect(verifyPassword('secret-password', hash)).resolves.toBe(true);
     await expect(verifyPassword('wrong-password', hash)).resolves.toBe(false);
   });
+
+  it('ハッシュ形式ではない平文パスワードを拒否する', async () => {
+    await expect(verifyPassword('password', 'password')).resolves.toBe(false);
+  });
+
+  it('未知のハッシュ方式を拒否する', async () => {
+    await expect(verifyPassword('password', 'unknown$100000$salt$hash')).resolves.toBe(false);
+  });
 });
 
 describe('session', () => {
@@ -25,5 +33,6 @@ describe('session', () => {
       username: 'admin',
     });
     await expect(verifySession(token, 'wrong-secret')).resolves.toBeNull();
+    await expect(verifySession('not-a-token', 'test-secret')).resolves.toBeNull();
   });
 });

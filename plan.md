@@ -607,6 +607,8 @@ Cloudflare Pages の Preview 環境では、レジ確認用として `PREVIEW_AU
 ロール:
 
 ```text
+staff
+pickup
 admin
 owner
 ```
@@ -614,14 +616,19 @@ owner
 ### 11.2 保存するSecret
 
 ```text
+STAFF_USERNAME
+STAFF_PASSWORD_HASH
 ADMIN_USERNAME
 ADMIN_PASSWORD_HASH
 OWNER_USERNAME
 OWNER_PASSWORD_HASH
+PICKUP_1_USERNAME ... PICKUP_4_USERNAME
+PICKUP_1_PASSWORD_HASH ... PICKUP_4_PASSWORD_HASH
 SESSION_SECRET
 ```
 
 平文パスワードは保存しないでください。
+パスワードハッシュと `SESSION_SECRET` は Cloudflare Secrets を正とし、ブラウザへ返したり管理 API から更新したりしないでください。D1 に残る既存ハッシュは移行互換用のフォールバックに限ります。
 
 ### 11.3 パスワードハッシュ
 
@@ -790,6 +797,7 @@ owner -> /admin
 商品選択画面:
 
 * 通常販売 / 事前販売モード切替
+* レジ1〜3は通常販売専用、レジ4は前売り販売専用
 * 商品ボタン一覧
 * カート
 * 合計金額
@@ -882,22 +890,26 @@ PC表示では「今回のお会計」を左側で最も大きく表示し、そ
 
 事前販売:
   sale_type = presale_pickup
-  payment_method = prepaid
-  現金受け取りなし
+  payment_method = cash
+  前日に現金受け取り
   事前販売枠として別集計
   在庫は減る
+  6文字の専用IDを発行し、翌日の前売り券専用PCで検索・受取済み記録を行う
+  発行後は前売り券専用PCの予約一覧に表示し、受取済み操作は日本時間の受取日以降だけ許可する
+  前売りIDは全期間で再利用せず、キャンセル不可
+  販売操作はレジ4に限定する
 ```
 
 確認画面の文言:
 
 ```text
-この内容で事前販売分の受け渡しを確定しますか？
+この内容で前売り券を発行しますか？
 ```
 
 確定ボタン:
 
 ```text
-受け渡し確定
+前売り券を発行
 ```
 
 ## 12.5 在庫画面 `/staff/stock`
@@ -910,6 +922,8 @@ PC表示では「今回のお会計」を左側で最も大きく表示し、そ
 * 廃棄ボタン
 * 棚卸し補正ボタン
 * 在庫イベント履歴
+
+管理画面の `/admin/inventory` では、全商品の初期在庫、現在庫、販売済み数、残り割合を一つの一覧で表示する。カテゴリで絞り込みでき、残り20%以下と売り切れは色で強調する。在庫一覧から補充、廃棄、棚卸し補正を実行できる。
 
 すべて確認画面を挟んでください。
 
@@ -1338,8 +1352,8 @@ admin以上
 {
   "idempotencyKey": "client-generated-uuid",
   "saleType": "presale_pickup",
-  "paymentMethod": "prepaid",
-  "paidAmount": 0,
+  "paymentMethod": "cash",
+  "paidAmount": 1000,
   "items": [
     {
       "productId": "yakisoba",

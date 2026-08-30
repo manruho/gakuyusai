@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { saleRequestSchema, validateSalePayment } from "../../worker/services/saleService";
+import { saleRequestSchema, validatePresaleRegister, validateSalePayment, validateSalesDay } from "../../worker/services/saleService";
 
 describe("validateSalePayment", () => {
   it("通常販売で預かり金額が不足している場合は拒否する", () => {
@@ -24,19 +24,25 @@ describe("validateSalePayment", () => {
     ).toBeNull();
   });
 
-  it("事前販売は事前支払い済みかつ預かり0円だけを受け付ける", () => {
+  it("事前販売は前日に現金を受け取り、合計以上の預かりを受け付ける", () => {
     expect(
       validateSalePayment(
-        { saleType: "presale_pickup", paymentMethod: "prepaid", paidAmount: 0 },
+        { saleType: "presale_pickup", paymentMethod: "cash", paidAmount: 1000 },
         750,
       ),
     ).toBeNull();
     expect(
       validateSalePayment(
-        { saleType: "presale_pickup", paymentMethod: "cash", paidAmount: 750 },
+        { saleType: "presale_pickup", paymentMethod: "prepaid", paidAmount: 0 },
         750,
       )?.code,
     ).toBe("INVALID_PAYMENT");
+    expect(
+      validateSalePayment(
+        { saleType: "presale_pickup", paymentMethod: "cash", paidAmount: 500 },
+        750,
+      )?.code,
+    ).toBe("INSUFFICIENT_PAYMENT");
   });
 });
 
@@ -65,5 +71,31 @@ describe("saleRequestSchema", () => {
       items: Array.from({ length: 101 }, (_, index) => ({ productId: `product-${index}`, quantity: 1 })),
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("validatePresaleRegister", () => {
+  it("前売り販売はレジ4だけを受け付ける", () => {
+    expect(validatePresaleRegister("presale_pickup", 4)).toBeNull();
+    expect(validatePresaleRegister("presale_pickup", 3)?.code).toBe("PRESALE_REGISTER_ONLY");
+    expect(validatePresaleRegister("normal", 3)).toBeNull();
+    expect(validatePresaleRegister("normal", 4)?.code).toBe("REGISTER4_PRESALE_ONLY");
+  });
+});
+
+describe("validateSalesDay", () => {
+  it("1日目は前売り券だけを受け付ける", () => {
+    expect(validateSalesDay('day1', 'presale_pickup')).toBeNull();
+    expect(validateSalesDay('day1', 'normal')?.code).toBe('DAY1_PRESALE_ONLY');
+  });
+
+  it("2日目は通常販売だけを受け付ける", () => {
+    expect(validateSalesDay('day2', 'normal')).toBeNull();
+    expect(validateSalesDay('day2', 'presale_pickup')?.code).toBe('DAY2_NORMAL_ONLY');
+  });
+
+  it("制限なしでは両方の販売種別を受け付ける", () => {
+    expect(validateSalesDay('all', 'normal')).toBeNull();
+    expect(validateSalesDay('all', 'presale_pickup')).toBeNull();
   });
 });

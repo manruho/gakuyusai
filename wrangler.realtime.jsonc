@@ -2,7 +2,19 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "gakuyusai-realtime",
   "main": "worker/realtimeWorker.ts",
-  "compatibility_date": "2026-05-30",
+  "compatibility_date": "2026-07-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  },
   "durable_objects": {
     "bindings": [
       {

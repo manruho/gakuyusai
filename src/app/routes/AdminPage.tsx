@@ -26,23 +26,17 @@ type Product = {
 type Settings = {
   public_status_enabled: string;
   sales_open: string;
+  sales_day: 'all' | 'day1' | 'day2';
   staff_username: string;
   admin_username: string;
   owner_username: string;
-  staff_password_hash: string;
-  admin_password_hash: string;
-  owner_password_hash: string;
   threshold_low: string;
   threshold_mid: string;
   threshold_high: string;
   pickup_1_username: string;
-  pickup_1_password_hash: string;
   pickup_2_username: string;
-  pickup_2_password_hash: string;
   pickup_3_username: string;
-  pickup_3_password_hash: string;
   pickup_4_username: string;
-  pickup_4_password_hash: string;
 };
 
 type EditForm = {
@@ -124,19 +118,17 @@ function toEditForm(item: Product): EditForm {
 const defaultSettings: Settings = {
   public_status_enabled: 'true',
   sales_open: 'true',
+  sales_day: 'all',
   staff_username: 'staff',
   admin_username: 'admin',
   owner_username: 'owner',
-  staff_password_hash: '',
-  admin_password_hash: '',
-  owner_password_hash: '',
   threshold_low: '0.15',
   threshold_mid: '0.35',
   threshold_high: '0.65',
-  pickup_1_username: 'pickup-1', pickup_1_password_hash: '',
-  pickup_2_username: 'pickup-2', pickup_2_password_hash: '',
-  pickup_3_username: 'pickup-3', pickup_3_password_hash: '',
-  pickup_4_username: 'pickup-4', pickup_4_password_hash: '',
+  pickup_1_username: 'pickup-1',
+  pickup_2_username: 'pickup-2',
+  pickup_3_username: 'pickup-3',
+  pickup_4_username: 'pickup-4',
 };
 
 export function AdminPage() {
@@ -201,11 +193,15 @@ export function AdminPage() {
         return (await response.json()) as { ok: true; data: { username: string; role: 'admin' | 'owner' } } | { ok: false };
       })
       .then((json) => {
-        if (json && json.ok) setViewer(json.data);
+        if (json && json.ok) {
+          setViewer(json.data);
+          if (json.data.role === 'owner') {
+            void load();
+            void loadSettings();
+          }
+        }
       });
-    void load();
     void loadSummary();
-    void loadSettings();
     void loadSales();
   }, []);
 
@@ -315,7 +311,7 @@ export function AdminPage() {
       body: JSON.stringify(settings),
     });
     const json = (await response.json()) as { ok: true } | { ok: false; error: { message: string } };
-    setMessage(json.ok ? 'ログイン情報としきい値を更新しました' : json.error.message);
+    setMessage(json.ok ? 'アカウント名と運用設定を更新しました' : json.error.message);
     if (json.ok) void loadSettings();
   };
 
@@ -329,6 +325,9 @@ export function AdminPage() {
             <p className="small">上から順に、状態確認 → 履歴確認 → 商品・設定変更を行えます。</p>
           </div>
           <div className="toolbar">
+            <a className="admin-link-button" href="/admin/inventory">
+              在庫一覧
+            </a>
             <a className="admin-link-button" href="/staff/register">
               レジへ
             </a>
@@ -339,9 +338,10 @@ export function AdminPage() {
         </div>
         <nav className="admin-nav" aria-label="管理画面のメニュー">
           <a href="#overview">概要</a>
+          <a href="/admin/inventory">在庫一覧</a>
           <a href="#sales-history">販売履歴</a>
-          <a href="#products">商品マスタ</a>
-          <a href="#settings">設定</a>
+          {viewer?.role === 'owner' ? <a href="#products">商品マスタ</a> : null}
+          {viewer?.role === 'owner' ? <a href="#settings">設定</a> : null}
           <a href="#exports">CSV出力</a>
         </nav>
         {message ? <p className="admin-feedback" role="status">{message}</p> : null}
@@ -353,7 +353,7 @@ export function AdminPage() {
             </div>
             <p className="small">現在の状態を確認してから、必要な操作を選択してください。</p>
           </div>
-          <div className="admin-status-grid">
+          {viewer?.role === 'owner' ? <div className="admin-status-grid">
             <div className="admin-status-card">
               <div><span>公開ページ</span><strong>{settings.public_status_enabled === 'true' ? '公開中' : '停止中'}</strong></div>
               <button type="button" onClick={() => void togglePublic('public_status_enabled', settings.public_status_enabled === 'true' ? 'false' : 'true')}>
@@ -366,13 +366,13 @@ export function AdminPage() {
                 {settings.sales_open === 'true' ? '販売を停止' : '販売を開始'}
               </button>
             </div>
-          </div>
+          </div> : null}
           <div className="admin-tool-row">
             <button type="button" onClick={() => void loadSummary()}>集計を更新</button>
             <button type="button" onClick={() => void loadCsv()}>CSVプレビューを読み込む</button>
           </div>
         </section>
-        <section className="admin-panel" id="settings">
+        {viewer?.role === 'owner' ? <section className="admin-panel" id="settings">
           <div className="section-head">
             <div>
               <p className="admin-section-kicker">02 / 設定</p>
@@ -381,7 +381,7 @@ export function AdminPage() {
             <p className="small">変更した項目を確認してから、最後に保存してください。</p>
           </div>
           <div className="form-grid admin-form-grid">
-            <div className="admin-form-subhead"><strong>ログインアカウント</strong><span>担当者ごとのログイン名と認証情報です。</span></div>
+            <div className="admin-form-subhead"><strong>ログインアカウント</strong><span>担当者ごとのログイン名です。パスワードハッシュはブラウザへ返さず、Cloudflare Secrets で管理します。</span></div>
             <label>
               staff username
               <span className="field-help">スタッフ用のログイン名です。</span>
@@ -397,22 +397,16 @@ export function AdminPage() {
               <span className="field-help">設定変更権限を持つログイン名です。</span>
               <input value={settings.owner_username} onChange={(e) => setSettings((current) => ({ ...current, owner_username: e.target.value }))} />
             </label>
-            <label>
-              staff password hash
-              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
-              <textarea value={settings.staff_password_hash} onChange={(e) => setSettings((current) => ({ ...current, staff_password_hash: e.target.value }))} />
-            </label>
-            <label>
-              admin password hash
-              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
-              <textarea value={settings.admin_password_hash} onChange={(e) => setSettings((current) => ({ ...current, admin_password_hash: e.target.value }))} />
-            </label>
-            <label>
-              owner password hash
-              <span className="field-help">平文ではなく PBKDF2 ハッシュを入れます。</span>
-              <textarea value={settings.owner_password_hash} onChange={(e) => setSettings((current) => ({ ...current, owner_password_hash: e.target.value }))} />
-            </label>
             <div className="admin-form-subhead"><strong>在庫表示のしきい値</strong><span>公開ページの在庫表示を切り替える基準値です。</span></div>
+            <div className="admin-form-subhead"><strong>文化祭の日程モード</strong><span>会計API側でも販売種別を制限します。通常運用では「制限なし」を選択してください。</span></div>
+            <label>
+              販売日
+              <select value={settings.sales_day} onChange={(e) => setSettings((current) => ({ ...current, sales_day: e.target.value as Settings['sales_day'] }))}>
+                <option value="all">制限なし</option>
+                <option value="day1">1日目：前売り券のみ</option>
+                <option value="day2">2日目：通常販売のみ</option>
+              </select>
+            </label>
             <label>
               しきい値 low
               <span className="field-help">在庫表示の最小ラインです。</span>
@@ -431,21 +425,19 @@ export function AdminPage() {
             <div className="admin-form-subhead"><strong>受取窓口アカウント</strong><span>受取1〜4のログイン情報です。受取場所ごとに設定できます。</span></div>
             {[1, 2, 3, 4].map((stationId) => {
               const usernameKey = `pickup_${stationId}_username` as keyof Settings;
-              const passwordKey = `pickup_${stationId}_password_hash` as keyof Settings;
               return (
                 <div className="settings-group" key={stationId}>
                   <strong>受取{stationId} アカウント</strong>
                   <label>username<input value={settings[usernameKey]} onChange={(e) => setSettings((current) => ({ ...current, [usernameKey]: e.target.value }))} /></label>
-                  <label>password hash<textarea value={settings[passwordKey]} onChange={(e) => setSettings((current) => ({ ...current, [passwordKey]: e.target.value }))} /></label>
                 </div>
               );
             })}
           </div>
           <div className="toolbar admin-primary-actions admin-save-bar">
-            <span className="small">パスワードはハッシュ形式で管理されます。</span>
+            <span className="small">パスワード変更は Cloudflare Pages の Secret 更新で行います。</span>
             <button type="button" onClick={() => void saveSettings()}>設定を保存</button>
           </div>
-        </section>
+        </section> : null}
         {summary ? (
           <div className="summary admin-summary">
             <p>売上合計: {formatYen(summary.totalSales)}</p>
@@ -491,7 +483,7 @@ export function AdminPage() {
             )}
           </div>
         </section>
-        <section className="admin-panel" id="products">
+        {viewer?.role === 'owner' ? <section className="admin-panel" id="products">
           <div className="section-head">
             <div>
               <p className="admin-section-kicker">04 / 変更</p>
@@ -565,7 +557,7 @@ export function AdminPage() {
               </div>
             </div>
           </div>
-        </section>
+        </section> : null}
         <section className="admin-panel" id="exports">
           <div className="section-head">
             <div>

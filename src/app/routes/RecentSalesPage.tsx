@@ -9,6 +9,7 @@ type Sale = {
   paid_amount: number;
   change_amount: number;
   status: 'completed' | 'canceled';
+  sale_type: 'normal' | 'presale_pickup';
   pickup_code: string;
   fulfillment_status: 'pending' | 'delivered' | 'canceled';
   items: Array<{ productName: string; quantity: number }>;
@@ -48,7 +49,7 @@ export function RecentSalesPage() {
             <article className="sale-row" key={sale.id}>
               <div><strong className="order-code">{sale.pickup_code}</strong><small>{formatDateTime(sale.created_at)}</small></div>
               <div><span>{sale.items.map((item) => `${item.productName} ×${item.quantity}`).join('、')}</span><small>{formatYen(sale.total_amount)} / 受取: {sale.fulfillment_status}</small></div>
-              {sale.status === 'completed' ? <button type="button" className="danger-secondary" onClick={() => void cancel(sale)}>取消</button> : <span>取消済み</span>}
+              {sale.status === 'completed' && sale.sale_type === 'normal' ? <button type="button" className="danger-secondary" onClick={() => void cancel(sale)}>取消</button> : sale.sale_type === 'presale_pickup' ? <span>前売り・取消不可</span> : <span>取消済み</span>}
             </article>
           ))}
           {!sales.length ? <p>最近の会計はありません。</p> : null}

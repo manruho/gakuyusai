@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatDateTime } from '../../lib/date';
+import { formatMonthDayTimeJst } from '../../lib/date';
 import { formatYen } from '../../lib/money';
 import type { PublicStatusItem, PublicStatusResponse } from '../../lib/types';
 
@@ -8,7 +8,7 @@ type PublicCategory = (typeof CATEGORIES)[number];
 
 const fallback: PublicStatusResponse = {
   shopName: '文化祭食品販売',
-  updatedAt: new Date().toISOString(),
+  updatedAt: '',
   items: [],
   isPublicEnabled: true,
 };
@@ -29,12 +29,49 @@ function splitAllergies(text: string) {
   return items.length ? items : ['なし'];
 }
 
-function getOnigiriFlavorClass(item: PublicStatusItem) {
+function getProductVisual(item: PublicStatusItem, category: PublicCategory) {
   const raw = `${item.displayName ?? ''} ${item.note ?? ''}`.trim();
+  if (category === '飲み物') {
+    if (/麦茶/.test(raw)) return 'drink-mugicha';
+    if (/緑茶/.test(raw)) return 'drink-tea';
+    if (/カルピス/.test(raw)) return 'drink-calpis';
+    if (/ラムネ|サイダー/.test(raw)) return 'drink-soda';
+    if (/グレープ/.test(raw)) return 'drink-grape';
+    if (/りんご/.test(raw)) return 'drink-apple';
+    if (/オレンジ/.test(raw)) return 'drink-orange';
+    if (/アクエリアス|水/.test(raw)) return 'drink-water';
+    if (/なたでここ|ナタデココ/.test(raw)) return 'drink-nata';
+    return 'drink-default';
+  }
+  if (category === 'サイドメニュー') return /唐揚げ|からあげ/.test(raw) ? 'karaage' : 'side';
+  if (/^塩$/.test(raw)) return 'shio';
   if (/梅|うめ/.test(raw)) return 'ume';
+  if (/しそ昆布/.test(raw)) return 'shiso-kombu';
+  if (/おかか/.test(raw)) return 'okaka';
+  if (/ツナマヨ/.test(raw)) return 'tuna-mayo';
+  if (/高菜/.test(raw)) return 'takana';
+  if (/とりそぼろ/.test(raw)) return 'tori-soboro';
+  if (/照り焼き/.test(raw)) return 'teriyaki';
+  if (/エビマヨ/.test(raw)) return 'ebi-mayo';
+  if (/チャン/.test(raw)) return 'chanja';
+  if (/焼きたらこ/.test(raw)) return 'yaki-tarako';
+  if (/黄ニラ/.test(raw)) return 'kinira';
+  if (/明太/.test(raw)) return 'mentaiko';
   if (/鮭|しゃけ|サーモン/.test(raw)) return 'salmon';
-  if (/昆布|こんぶ|高菜|わかめ/.test(raw)) return 'kombu';
-  return '';
+  if (/エビ天/.test(raw)) return 'ebi-ten';
+  if (/煮豚|チャーシュー/.test(raw)) return 'chashu';
+  return 'plain';
+}
+
+function ProductIllustration({ item, category }: { item: PublicStatusItem; category: PublicCategory }) {
+  const visual = getProductVisual(item, category);
+  if (category === '飲み物') {
+    return <div className={`product-illustration drink-illustration ${visual}`} aria-hidden="true"><span className="drink-cap" /><span className="drink-bottle"><span /></span></div>;
+  }
+  if (visual === 'karaage' || visual === 'side') {
+    return <div className={`product-illustration side-illustration ${visual}`} aria-hidden="true"><span /><span /><span /></div>;
+  }
+  return <div className={`product-illustration onigiri-illustration ${visual}`} aria-hidden="true"><span className="onigiri-nori" /></div>;
 }
 
 function getStockMeter(item: PublicStatusItem) {
@@ -99,21 +136,17 @@ export function PublicPage() {
 
         <section className="notice-board" aria-label="販売情報">
           <div className="notice">
-            <strong>{formatDateTime(data.updatedAt)}</strong>
-            <span>販売状況を更新しました</span>
+            <strong>{data.updatedAt ? formatMonthDayTimeJst(data.updatedAt) : '未取得'}</strong>
+            <span>{data.updatedAt ? '販売状況を更新しました' : '販売状況を取得できていません'}</span>
           </div>
           <div className="notice">
             <strong>{data.isPublicEnabled ? '公開中' : '停止中'}</strong>
-            <span>売り切れ {soldOutCount}品</span>
+            <span>売り切れ {data.updatedAt ? soldOutCount : '—'}品</span>
           </div>
         </section>
 
         {error ? <p className="public-banner">{error}</p> : null}
         {!data.isPublicEnabled ? <p className="public-banner">公開ページは現在停止中です。</p> : null}
-
-        <div className="section-title">
-          <span>今日のメニュー</span>
-        </div>
 
         <nav className="public-category-tabs" aria-label="カテゴリを切り替える">
           {CATEGORIES.map((category) => (
@@ -134,11 +167,10 @@ export function PublicPage() {
             const category = normalizeCategory(item);
             const allergies = splitAllergies(item.allergyText);
             const stock = getStockMeter(item);
-            const flavorClass = category === 'おにぎり' ? getOnigiriFlavorClass(item) : 'side';
 
             return (
               <article key={item.id} className={item.isSoldOut ? 'menu-card is-soldout' : 'menu-card'}>
-                <div className={`mini-onigiri ${flavorClass}`} aria-hidden="true" />
+                <ProductIllustration item={item} category={category} />
                 <div className="menu-content">
                   <h2 className="menu-name">{item.displayName}</h2>
                   <p className="menu-meta">アレルギー: {allergies.join('・')}</p>

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 
 const stations = [
   { id: 1, color: '赤' },
-  { id: 2, color: '青' },
+  { id: 2, color: '黄色' },
   { id: 3, color: '緑' },
-  { id: 4, color: '水色' },
+  { id: 4, color: '白' },
 ] as const;
 
 export function RegisterSelectPage() {

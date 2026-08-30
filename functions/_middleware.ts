@@ -26,10 +26,11 @@ function homeForRole(role: SessionPayload['role']): string {
 }
 
 async function readSession(request: Request, env: AuthEnv): Promise<SessionPayload | null> {
+  if (!env.SESSION_SECRET) return null;
   const token = request.headers.get('Cookie')?.match(/(?:^|;\s*)session=([^;]+)/)?.[1];
   if (!token) return null;
   try {
-    return await verifySession(decodeURIComponent(token), env.SESSION_SECRET ?? 'dev-secret');
+    return await verifySession(decodeURIComponent(token), env.SESSION_SECRET);
   } catch {
     return null;
   }
@@ -43,6 +44,9 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     ? { role: 'staff' as const, username: 'preview-staff', exp: Date.now() + 60_000 }
     : await readSession(context.request, context.env);
 
+  if (!shouldBypassStaffAuth(context.env) && !context.env.SESSION_SECRET) {
+    return new Response('SESSION_SECRET is not configured.', { status: 500 });
+  }
   if (!session) {
     const loginUrl = new URL('/login', context.request.url);
     loginUrl.searchParams.set('returnTo', new URL(context.request.url).pathname);

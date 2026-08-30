@@ -1,3 +1,5 @@
+import { normalizeSearchTerm } from '../services/searchService';
+
 export type ProductRow = {
   id: string;
   name: string;
@@ -14,16 +16,17 @@ export type ProductRow = {
   note: string;
   created_at: string;
   updated_at: string;
+  inventory_updated_at: string;
 };
 
-type SettingRow = { key: string; value: string };
+type SettingRow = { key: string; value: string; updated_at: string };
 
 export async function queryProducts(db: D1Database, onlyPublic = false): Promise<ProductRow[]> {
   const where = onlyPublic ? 'WHERE p.is_public = 1 AND p.is_active = 1 AND p.deleted_at IS NULL' : 'WHERE p.deleted_at IS NULL';
   const rows = await db.prepare(
     `SELECT p.id, p.name, p.display_name, p.category, p.price, p.initial_stock, i.current_stock,
             p.is_public, p.is_active, p.sort_order, p.allergy_text, p.description, p.note,
-            p.created_at, p.updated_at
+            p.created_at, p.updated_at, i.updated_at AS inventory_updated_at
      FROM products p
      JOIN product_inventory i ON i.product_id = p.id
      ${where}
@@ -33,8 +36,22 @@ export async function queryProducts(db: D1Database, onlyPublic = false): Promise
 }
 
 export async function getSettings(db: D1Database): Promise<Record<string, string>> {
-  const rows = await db.prepare('SELECT key, value FROM settings').all();
-  return Object.fromEntries(((rows.results ?? []) as SettingRow[]).map((row) => [row.key, row.value]));
+  return (await getSettingsSnapshot(db)).values;
+}
+
+export async function getSettingsSnapshot(
+  db: D1Database,
+  keys?: readonly string[],
+): Promise<{ values: Record<string, string>; updatedAt: string | null }> {
+  if (keys?.length === 0) return { values: {}, updatedAt: null };
+  const rows = await db.prepare(
+    `SELECT key, value, updated_at FROM settings${keys ? ` WHERE key IN (${keys.map(() => '?').join(',')})` : ''}`,
+  ).bind(...(keys ?? [])).all<SettingRow>();
+  const results = rows.results ?? [];
+  return {
+    values: Object.fromEntries(results.map((row) => [row.key, row.value])),
+    updatedAt: results.reduce<string | null>((latest, row) => !latest || row.updated_at > latest ? row.updated_at : latest, null),
+  };
 }
 
 export async function getSetting(db: D1Database, key: string): Promise<string | null> {
@@ -101,67 +118,63 @@ export async function querySalesByFilter(
     canceled_at: string | null;
   }>
 > {
-  const query = filter.query?.trim().toLowerCase() ?? '';
-  const limit = filter.limit ?? 100;
+  const query = normalizeSearchTerm(filter.query);
+  const limit = filter.limit;
+  const where = query
+    ? `WHERE LOWER(
+         s.id || ' ' || s.idempotency_key || ' ' || s.sale_type || ' ' || s.status || ' ' ||
+         s.created_by_role || ' ' || s.created_at || ' ' || COALESCE(s.canceled_at, '')
+       ) LIKE ?
+       OR EXISTS (
+         SELECT 1
+         FROM sale_items searched_items
+         JOIN products searched_products ON searched_products.id = searched_items.product_id
+         WHERE searched_items.sale_id = s.id
+           AND LOWER(searched_items.product_id || ' ' || searched_products.display_name) LIKE ?
+       )`
+    : '';
   const rows = await db
     .prepare(
       `SELECT s.id, s.idempotency_key, s.sale_type, s.total_amount, s.paid_amount, s.change_amount,
-              s.payment_method, s.status, s.created_by_role, s.register_id, s.created_at, s.canceled_at,
-              GROUP_CONCAT(si.product_id, ' ') AS product_ids
+              s.payment_method, s.status, s.created_by_role, s.register_id, s.created_at, s.canceled_at
        FROM sales s
-       LEFT JOIN sale_items si ON si.sale_id = s.id
-       GROUP BY s.id
+       ${where}
        ORDER BY s.created_at DESC
-       LIMIT ?`,
+       ${limit === undefined ? '' : 'LIMIT ?'}`,
     )
-    .bind(limit)
+    .bind(...(query ? [`%${query}%`, `%${query}%`] : []), ...(limit === undefined ? [] : [limit]))
     .all();
 
-  const sales = (rows.results ?? []) as Array<
-    {
-      id: string;
-      idempotency_key: string;
-      sale_type: 'normal' | 'presale_pickup';
-      total_amount: number;
-      paid_amount: number;
-      change_amount: number;
-      payment_method: 'cash' | 'prepaid';
-      status: 'completed' | 'canceled';
-      created_by_role: 'staff' | 'admin' | 'owner';
-      register_id: number;
-      created_at: string;
-      canceled_at: string | null;
-      product_ids?: string | null;
-    }
-  >;
+  return (rows.results ?? []) as Awaited<ReturnType<typeof querySales>>;
+}
 
-  if (!query) {
-    return sales.map((sale) => {
-      const result = { ...sale };
-      delete result.product_ids;
-      return result;
-    });
-  }
-
-  return sales
-    .filter((sale) => {
-      const haystack = [
-        sale.id,
-        sale.idempotency_key,
-        sale.sale_type,
-        sale.status,
-        sale.created_by_role,
-        sale.created_at,
-        sale.canceled_at ?? '',
-        sale.product_ids ?? '',
-      ]
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(query);
-    })
-    .map((sale) => {
-      const result = { ...sale };
-      delete result.product_ids;
-      return result;
-    });
+export async function queryAdminSummary(db: D1Database): Promise<{
+  totalSales: number;
+  completedSales: number;
+  totalProducts: number;
+  totalQuantity: number;
+}> {
+  const rows = await db.prepare(
+    `SELECT
+       COALESCE((SELECT SUM(total_amount) FROM sales WHERE status = 'completed'), 0) AS totalSales,
+       (SELECT COUNT(*) FROM sales WHERE status = 'completed') AS completedSales,
+       (SELECT COUNT(*) FROM products WHERE deleted_at IS NULL) AS totalProducts,
+       COALESCE((
+         SELECT SUM(si.quantity)
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         WHERE s.status = 'completed'
+       ), 0) AS totalQuantity`,
+  ).all<{
+    totalSales: number;
+    completedSales: number;
+    totalProducts: number;
+    totalQuantity: number;
+  }>();
+  return (rows.results ?? [])[0] ?? {
+    totalSales: 0,
+    completedSales: 0,
+    totalProducts: 0,
+    totalQuantity: 0,
+  };
 }

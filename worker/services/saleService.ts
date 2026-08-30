@@ -31,8 +31,14 @@ export const saleRequestSchema = z.object({
 
 export type SaleRequest = z.infer<typeof saleRequestSchema>;
 
+export type SalesDay = 'all' | 'day1' | 'day2';
+
+export function parseSalesDay(value: string | null | undefined): SalesDay {
+  return value === 'day1' || value === 'day2' ? value : 'all';
+}
+
 type SaleError = {
-  status: 400 | 404 | 409;
+  status: 400 | 403 | 404 | 409;
   code: string;
   message: string;
 };
@@ -43,8 +49,7 @@ export function validateSalePayment(
 ): SaleError | null {
   if (
     (request.saleType === "normal" && request.paymentMethod !== "cash") ||
-    (request.saleType === "presale_pickup" &&
-      (request.paymentMethod !== "prepaid" || request.paidAmount !== 0))
+    (request.saleType === "presale_pickup" && request.paymentMethod !== "cash")
   ) {
     return {
       status: 400,
@@ -52,11 +57,47 @@ export function validateSalePayment(
       message: "支払い方法が販売種別と一致しません。",
     };
   }
-  if (request.saleType === "normal" && request.paidAmount < totalAmount) {
+  if (request.paidAmount < totalAmount) {
     return {
       status: 400,
       code: "INSUFFICIENT_PAYMENT",
       message: `預かり金額が不足しています。あと${totalAmount - request.paidAmount}円です。`,
+    };
+  }
+  return null;
+}
+
+export function validatePresaleRegister(saleType: SaleRequest['saleType'], registerId: 1 | 2 | 3 | 4): SaleError | null {
+  if (saleType === 'presale_pickup' && registerId !== 4) {
+    return {
+      status: 403,
+      code: 'PRESALE_REGISTER_ONLY',
+      message: '前売り券の販売はレジ4でのみ利用できます。',
+    };
+  }
+  if (saleType === 'normal' && registerId === 4) {
+    return {
+      status: 403,
+      code: 'REGISTER4_PRESALE_ONLY',
+      message: 'レジ4は前売り券専用です。',
+    };
+  }
+  return null;
+}
+
+export function validateSalesDay(salesDay: SalesDay, saleType: SaleRequest['saleType']): SaleError | null {
+  if (salesDay === 'day1' && saleType !== 'presale_pickup') {
+    return {
+      status: 409,
+      code: 'DAY1_PRESALE_ONLY',
+      message: '1日目は前売り券の販売のみ受け付けています。',
+    };
+  }
+  if (salesDay === 'day2' && saleType !== 'normal') {
+    return {
+      status: 409,
+      code: 'DAY2_NORMAL_ONLY',
+      message: '2日目は通常販売のみ受け付けています。',
     };
   }
   return null;
@@ -80,9 +121,69 @@ type SaleRecord = {
 
 type ProductRow = {
   id: string;
+  display_name: string;
   price: number;
   current_stock: number;
 };
+
+type SaleLineItem = {
+  product: ProductRow;
+  quantity: number;
+  subtotal: number;
+};
+
+function splitIntoChunks<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let offset = 0; offset < items.length; offset += size) {
+    chunks.push(items.slice(offset, offset + size));
+  }
+  return chunks;
+}
+
+function buildSaleItemStatements(db: D1Database, saleId: string, items: SaleLineItem[]): D1PreparedStatement[] {
+  // Six bindings per row; keep each statement below D1's 100-binding limit.
+  return splitIntoChunks(items, 16).map((chunk) => db.prepare(
+    `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price, subtotal)
+     VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')}`,
+  ).bind(...chunk.flatMap((item) => [
+    createId('sale_item'), saleId, item.product.id, item.quantity, item.product.price, item.subtotal,
+  ])));
+}
+
+function buildInventoryUpdateStatements(db: D1Database, items: SaleLineItem[], now: string): D1PreparedStatement[] {
+  // Three bindings per product (CASE id, quantity, and IN id).
+  return splitIntoChunks(items, 33).map((chunk) => {
+    const caseExpression = chunk.map(() => 'WHEN ? THEN ?').join(' ');
+    return db.prepare(
+      `UPDATE product_inventory
+       SET current_stock = current_stock - CASE product_id ${caseExpression} ELSE 0 END,
+           updated_at = ?
+       WHERE product_id IN (${chunk.map(() => '?').join(', ')})`,
+    ).bind(
+      ...chunk.flatMap((item) => [item.product.id, item.quantity]),
+      now,
+      ...chunk.map((item) => item.product.id),
+    );
+  });
+}
+
+function buildStockEventStatements(
+  db: D1Database,
+  saleId: string,
+  saleType: SaleRequest['saleType'],
+  role: 'staff' | 'admin' | 'owner',
+  items: SaleLineItem[],
+  now: string,
+): D1PreparedStatement[] {
+  // Eight bindings per row; keep each statement below D1's 100-binding limit.
+  return splitIntoChunks(items, 12).map((chunk) => db.prepare(
+    `INSERT INTO stock_events (id, product_id, event_type, quantity_delta, related_sale_id, reason, created_by_role, created_at)
+     VALUES ${chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+  ).bind(...chunk.flatMap((item) => [
+    createId('stock_event'), item.product.id, saleType === 'normal' ? 'sale' : 'presale_pickup',
+    -item.quantity, saleId, '', role, now,
+  ])));
+}
 
 async function matchesIdempotencyRequest(
   db: D1Database,
@@ -115,6 +216,8 @@ export type SaleResult = {
   pickupCode: string;
   registerId: 1 | 2 | 3 | 4;
   stationId: 1 | 2 | 3 | 4;
+  createdAt: string;
+  items: Array<{ productId: string; productName: string; quantity: number }>;
 };
 
 async function findSaleByIdempotencyKey(
@@ -146,20 +249,29 @@ function reusedSaleResult(sale: SaleRecord): SaleResult {
     pickupCode: sale.pickup_code ?? '',
     registerId: (sale.register_id ?? 1) as 1 | 2 | 3 | 4,
     stationId: (sale.register_id ?? 1) as 1 | 2 | 3 | 4,
+    createdAt: sale.created_at,
+    items: [],
   };
 }
 
-function getBusinessDate(): string {
-  return new Intl.DateTimeFormat('en-CA', {
+function getBusinessDate(offsetDays = 0): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(new Date());
+  }).formatToParts(new Date());
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  const date = new Date(Date.UTC(
+    Number(values.get('year')),
+    Number(values.get('month')) - 1,
+    Number(values.get('day')) + offsetDays,
+  ));
+  return date.toISOString().slice(0, 10);
 }
 
-export function generatePickupCode(): string {
-  const values = new Uint32Array(PICKUP_CODE_LENGTH);
+export function generatePickupCode(length = PICKUP_CODE_LENGTH): string {
+  const values = new Uint32Array(length);
   crypto.getRandomValues(values);
   return Array.from(values, (value) => PICKUP_CODE_CHARS[value % PICKUP_CODE_CHARS.length]).join('');
 }
@@ -169,6 +281,7 @@ export async function processSale(
   role: "staff" | "admin" | "owner",
   registerId: 1 | 2 | 3 | 4,
   request: unknown,
+  options: { salesDay?: SalesDay } = {},
 ): Promise<SaleResult | { error: SaleError }> {
   let idempotencyKey: string | null = null;
   try {
@@ -184,6 +297,10 @@ export async function processSale(
     }
 
     const body = parsed.data;
+    const registerError = validatePresaleRegister(body.saleType, registerId);
+    if (registerError) return { error: registerError };
+    const salesDayError = validateSalesDay(options.salesDay ?? 'all', body.saleType);
+    if (salesDayError) return { error: salesDayError };
     idempotencyKey = body.idempotencyKey;
     const existing = await findSaleByIdempotencyKey(db, body.idempotencyKey);
     if (existing) {
@@ -201,7 +318,7 @@ export async function processSale(
 
     const productsRows = await db
       .prepare(
-        `SELECT id, price, current_stock
+        `SELECT p.id, p.display_name, p.price, i.current_stock
          FROM products p
          JOIN product_inventory i ON i.product_id = p.id
          WHERE p.id IN (${body.items.map(() => "?").join(",")})
@@ -237,10 +354,11 @@ export async function processSale(
     const saleId = createId("sale");
     const now = new Date().toISOString();
     const businessDate = getBusinessDate();
+    const pickupDate = body.saleType === 'presale_pickup' ? getBusinessDate(1) : businessDate;
     let pickupCode = '';
     let committed = false;
     for (let attempt = 0; attempt < 10 && !committed; attempt += 1) {
-      pickupCode = generatePickupCode();
+      pickupCode = generatePickupCode(body.saleType === 'presale_pickup' ? 6 : PICKUP_CODE_LENGTH);
       try {
         await db.batch([
           db
@@ -260,29 +378,13 @@ export async function processSale(
               now,
               registerId,
             ),
-          ...lineItems.flatMap((item) => [
-            db
-              .prepare(
-                `INSERT INTO sale_items (id, sale_id, product_id, quantity, unit_price, subtotal)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              )
-              .bind(createId("sale_item"), saleId, item.product.id, item.quantity, item.product.price, item.subtotal),
-            db
-              .prepare(
-                `UPDATE product_inventory SET current_stock = current_stock - ?, updated_at = ? WHERE product_id = ?`,
-              )
-              .bind(item.quantity, now, item.product.id),
-            db
-              .prepare(
-                `INSERT INTO stock_events (id, product_id, event_type, quantity_delta, related_sale_id, reason, created_by_role, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              )
-              .bind(createId("stock_event"), item.product.id, body.saleType === "normal" ? "sale" : "presale_pickup", -item.quantity, saleId, '', role, now),
-          ]),
+          ...buildSaleItemStatements(db, saleId, lineItems),
+          ...buildInventoryUpdateStatements(db, lineItems, now),
+          ...buildStockEventStatements(db, saleId, body.saleType, role, lineItems, now),
           db.prepare(
-            `INSERT INTO fulfillment_orders (id, sale_id, business_date, register_id, station_id, pickup_code, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          ).bind(createId('fulfillment'), saleId, businessDate, registerId, registerId, pickupCode, now, now),
+            `INSERT INTO fulfillment_orders (id, sale_id, business_date, pickup_date, register_id, station_id, pickup_code, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+          ).bind(createId('fulfillment'), saleId, businessDate, pickupDate, registerId, registerId, pickupCode, now, now),
           db.prepare(
             `INSERT INTO fulfillment_events (id, fulfillment_order_id, event_type, from_status, to_status, actor_role, actor_username, created_at)
              SELECT ?, id, 'created', NULL, 'pending', ?, ?, ? FROM fulfillment_orders WHERE sale_id = ?`,
@@ -316,6 +418,12 @@ export async function processSale(
       pickupCode,
       registerId,
       stationId: registerId,
+      createdAt: now,
+      items: lineItems.map((item) => ({
+        productId: item.product.id,
+        productName: item.product.display_name,
+        quantity: item.quantity,
+      })),
     };
   } catch (error) {
     if (

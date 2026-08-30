@@ -3,19 +3,20 @@ import { getStockLevelWithThresholds, getStockStatusText } from '../src/lib/stoc
 import { verifyPassword } from '../src/lib/password';
 import { signSession, verifySession } from '../src/lib/session';
 import { buildSessionPayload } from './services/authService';
-import { getSetting, getSettings, queryProducts, querySales, querySalesByFilter } from './db/queries';
+import { getSettings, getSettingsSnapshot, queryAdminSummary, queryProducts, querySalesByFilter, type ProductRow } from './db/queries';
 import { buildLoginLockedMessage, getLoginThrottle, isLoginLocked, recordLoginFailure, resetLoginThrottle, shouldBypassStaffAuth } from './services/authService';
-import { processSale } from './services/saleService';
-import { buildSalesCsv, buildStockEventsCsv } from './services/csvService';
-import { cancelSale, listStock, listStockHistory, recordStockEvent } from './services/stockService';
-import { acknowledgeCancellation, deliverOrder, listFulfillmentOrders, listRecentSalesForRegister, restoreOrder } from './services/fulfillmentService';
+import { parseSalesDay, processSale, type SaleResult } from './services/saleService';
+import { listSalesCsvPage, listStockEventsCsvPage, SALES_CSV_HEADER, salesCsvLine, STOCK_EVENTS_CSV_HEADER, stockEventCsvLine } from './services/csvService';
+import { cancelSale, listStock, listStockHistory, recordStockEvent, stockEventSchema } from './services/stockService';
+import { acknowledgeCancellation, deliverOrder, getFulfillmentSummary, getPickupSaleType, getTokyoDate, listFulfillmentOrders, listRecentSalesForRegister, restoreOrder } from './services/fulfillmentService';
 import { getFulfillmentOrderBySale } from './services/fulfillmentService';
 import { getFulfillmentOrderById } from './services/fulfillmentService';
 import { getRealtimeConnectionCount, publishRealtimeEvent, type RealtimeEvent, RealtimeHub } from './realtimeHub';
 import { createId } from '../src/lib/ids';
+import { EDITABLE_SETTING_NAMES, editableSettingsSchema, readStockThresholds, sanitizeSettings, validateThresholdOrder } from './services/settingsService';
+import { z } from 'zod';
 
-type Env = {
-  DB: D1Database;
+type Env = Omit<Cloudflare.Env, 'REALTIME_HUB' | 'PREVIEW_AUTH_BYPASS'> & {
   STAFF_USERNAME?: string;
   STAFF_PASSWORD_HASH?: string;
   ADMIN_USERNAME?: string;
@@ -38,20 +39,68 @@ type Env = {
 };
 const app = new Hono<{ Bindings: Env }>();
 
+const productFieldsSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  displayName: z.string().trim().min(1).max(100),
+  category: z.string().trim().max(50).optional(),
+  price: z.number().int().min(0).max(10_000_000),
+  initialStock: z.number().int().min(0).max(1_000_000),
+  isPublic: z.boolean(),
+  isActive: z.boolean(),
+  sortOrder: z.number().int().min(-1_000_000).max(1_000_000),
+  allergyText: z.string().max(2_000),
+  description: z.string().max(2_000),
+  note: z.string().max(2_000),
+});
+
+const productCreateSchema = productFieldsSchema.extend({
+  id: z.string().trim().min(1).max(100),
+});
+
+const settingEntrySchema = z.object({
+  key: z.string().trim().min(1).max(100),
+  value: z.string().max(10_000),
+}).strict();
+
+const loginSchema = z.object({
+  username: z.string().trim().max(100).optional(),
+  password: z.string().max(10_000).optional(),
+  loginTarget: z.enum(['staff', 'pickup', 'admin', 'owner']).optional(),
+  stationId: z.number().int().min(1).max(4).optional(),
+});
+
+const registerSelectionSchema = z.object({
+  registerId: z.number().int().min(1).max(4),
+});
+
+const cancelSaleSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+  restoreStock: z.boolean().optional(),
+});
+
+const deleteConfirmationSchema = z.object({
+  confirmation: z.string().optional(),
+});
+
 async function requireSession(c: Context<{ Bindings: Env }>) {
   if (shouldBypassStaffAuth(c.env)) {
+    const cookie = c.req.header('Cookie') ?? '';
+    const previewRegisterId = parseId(cookie.match(/(?:^|;\s*)preview_register_id=([^;]+)/)?.[1]);
     return {
       role: 'staff' as const,
       username: 'preview-staff',
-      registerId: 1 as const,
+      registerId: previewRegisterId ?? 1,
       exp: Date.now() + 12 * 60 * 60 * 1000,
     };
   }
   const cookie = c.req.header('Cookie') ?? '';
   const token = cookie.match(/(?:^|;\s*)session=([^;]+)/)?.[1];
-  if (!token) return null;
-  const session = await verifySession(decodeURIComponent(token), c.env.SESSION_SECRET ?? 'dev-secret');
-  return session;
+  if (!token || !c.env.SESSION_SECRET) return null;
+  try {
+    return await verifySession(decodeURIComponent(token), c.env.SESSION_SECRET);
+  } catch {
+    return null;
+  }
 }
 
 async function requireRole(c: Context<{ Bindings: Env }>, allowed: Array<'staff' | 'pickup' | 'admin' | 'owner'>) {
@@ -70,6 +119,14 @@ async function requireOwner(c: Context<{ Bindings: Env }>) {
   return requireRole(c, ['owner']);
 }
 
+async function ownerAccessDenied(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const session = await requireSession(c);
+  if (!session) {
+    return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
+  }
+  return c.json({ ok: false, error: { code: 'FORBIDDEN', message: 'owner 権限が必要です。' } }, 403);
+}
+
 function buildSessionCookie(token: string, secure: boolean): string {
   const parts = [`session=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=43200'];
   if (secure) parts.push('Secure');
@@ -79,6 +136,117 @@ function buildSessionCookie(token: string, secure: boolean): string {
 function parseId(value: string | undefined): 1 | 2 | 3 | 4 | null {
   const number = Number(value);
   return number === 1 || number === 2 || number === 3 || number === 4 ? number : null;
+}
+
+function parseLimit(value: string | undefined, fallback: number, maximum: number): number {
+  const number = Number(value);
+  return Number.isInteger(number) ? Math.max(1, Math.min(number, maximum)) : fallback;
+}
+
+function createCsvResponse<Row>(
+  fileName: string,
+  header: string,
+  loadPage: (limit: number, offset: number) => Promise<Row[]>,
+  toLine: (row: Row) => string,
+): Response {
+  const pageSize = 500;
+  const encoder = new TextEncoder();
+  let offset = 0;
+  let firstChunk = true;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const rows = await loadPage(pageSize, offset);
+        const prefix = firstChunk ? `\ufeff${header}\n` : '';
+        firstChunk = false;
+        controller.enqueue(encoder.encode(`${prefix}${rows.map(toLine).join('\n')}${rows.length ? '\n' : ''}`));
+        offset += rows.length;
+        if (rows.length < pageSize) controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+  });
+  return new Response(body, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+function latestProductUpdatedAt(products: ProductRow[]): string {
+  return products.reduce((latest, item) => {
+    const itemLatest = item.inventory_updated_at > item.updated_at ? item.inventory_updated_at : item.updated_at;
+    return itemLatest > latest ? itemLatest : latest;
+  }, products[0] ? '' : new Date().toISOString());
+}
+
+function latestUpdatedAt(products: ProductRow[], settingsUpdatedAt: string | null): string {
+  const productUpdatedAt = latestProductUpdatedAt(products);
+  return settingsUpdatedAt && settingsUpdatedAt > productUpdatedAt ? settingsUpdatedAt : productUpdatedAt;
+}
+
+async function putInCache(c: Context<{ Bindings: Env }>, key: Request, response: Response): Promise<void> {
+  const cache = await caches.open('gakuyusai-public-status-v1');
+  const task = cache.put(key, response.clone()).catch((error: unknown) => {
+    console.error(JSON.stringify({ message: 'public status cache write failed', error: String(error) }));
+  });
+  try {
+    c.executionCtx.waitUntil(task);
+  } catch {
+    await task;
+  }
+}
+
+function toAdminProduct(item: ProductRow) {
+  return {
+    id: item.id,
+    name: item.name,
+    displayName: item.display_name,
+    category: item.category,
+    price: item.price,
+    initialStock: item.initial_stock,
+    currentStock: item.current_stock,
+    isPublic: item.is_public === 1,
+    isActive: item.is_active === 1,
+    sortOrder: item.sort_order,
+    allergyText: item.allergy_text,
+    description: item.description,
+    note: item.note,
+    createdAt: item.created_at,
+    updatedAt: item.inventory_updated_at > item.updated_at ? item.inventory_updated_at : item.updated_at,
+  };
+}
+
+type SaleItemRow = {
+  sale_id: string;
+  product_id: string;
+  display_name: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+};
+
+async function querySaleItemsForSales(db: D1Database, saleIds: string[]): Promise<SaleItemRow[]> {
+  if (!saleIds.length) return [];
+  const statements: D1PreparedStatement[] = [];
+  for (let offset = 0; offset < saleIds.length; offset += 80) {
+    const chunk = saleIds.slice(offset, offset + 80);
+    statements.push(
+      db.prepare(
+        `SELECT si.sale_id, si.product_id, p.display_name, si.quantity, si.unit_price, si.subtotal
+         FROM sale_items si
+         JOIN products p ON p.id = si.product_id
+         WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
+         ORDER BY si.sale_id DESC, si.id ASC`,
+      ).bind(...chunk),
+    );
+  }
+  const results = await db.batch<SaleItemRow>(statements);
+  return results.flatMap((result) => result.results ?? []);
 }
 
 function toRealtimeEvent(order: Awaited<ReturnType<typeof getFulfillmentOrderBySale>>, type: RealtimeEvent['type']): RealtimeEvent | null {
@@ -99,9 +267,26 @@ function toRealtimeEvent(order: Awaited<ReturnType<typeof getFulfillmentOrderByS
   };
 }
 
+function toCreatedRealtimeEvent(result: SaleResult): RealtimeEvent {
+  return {
+    eventId: createId('event'),
+    type: 'order.created',
+    stationId: result.stationId,
+    occurredAt: new Date().toISOString(),
+    data: {
+      saleId: result.saleId,
+      pickupCode: result.pickupCode,
+      registerId: result.registerId,
+      status: 'pending',
+      createdAt: result.createdAt,
+      items: result.items,
+    },
+  };
+}
+
 async function scheduleRealtimeEvent(c: Context<{ Bindings: Env }>, event: RealtimeEvent): Promise<void> {
   const task = publishRealtimeEvent(c.env.REALTIME_HUB, event).catch((error) => {
-    console.error('Realtime notification failed', error);
+    console.error(JSON.stringify({ message: 'realtime notification failed', error: String(error) }));
   });
   try {
     c.executionCtx.waitUntil(task);
@@ -118,22 +303,38 @@ app.get('/api/health', (c) =>
   }),
 );
 
+app.use('/api/*', async (c, next) => {
+  await next();
+  if (c.req.path !== '/api/public/status') {
+    c.header('Cache-Control', 'private, no-store');
+  }
+  c.header('X-Content-Type-Options', 'nosniff');
+});
+
 app.get('/api/public/status', async (c) => {
+  const cacheUrl = new URL(c.req.url);
+  cacheUrl.search = '';
+  const cacheKey = new Request(cacheUrl, { method: 'GET' });
+  const cache = await caches.open('gakuyusai-public-status-v1');
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
   const products = await queryProducts(c.env.DB, true);
-  const settings = await getSettings(c.env.DB);
+  const settingsSnapshot = await getSettingsSnapshot(c.env.DB, [
+    'public_status_enabled',
+    'shop_name',
+    'threshold_low',
+    'threshold_mid',
+    'threshold_high',
+  ]);
+  const settings = settingsSnapshot.values;
   const isPublicEnabled = settings.public_status_enabled !== 'false';
   const shopName = c.env.PUBLIC_SHOP_NAME ?? settings.shop_name ?? '文化祭食品販売';
-  const thresholds = {
-    low: Number(settings.threshold_low ?? '0.15'),
-    mid: Number(settings.threshold_mid ?? '0.35'),
-    high: Number(settings.threshold_high ?? '0.65'),
-  };
-  const latestUpdatedAt = products.reduce((latest, item) => (item.updated_at > latest ? item.updated_at : latest), products[0]?.updated_at ?? new Date().toISOString());
+  const thresholds = readStockThresholds(settings);
   const response = c.json({
     ok: true,
     data: {
       shopName,
-      updatedAt: latestUpdatedAt,
+      updatedAt: latestUpdatedAt(products, settingsSnapshot.updatedAt),
       isPublicEnabled,
       items: (isPublicEnabled ? products : []).map((item) => {
         const statusLevel = getStockLevelWithThresholds(item.current_stock, item.initial_stock, thresholds);
@@ -152,29 +353,43 @@ app.get('/api/public/status', async (c) => {
       }),
     },
   });
-  response.headers.set('Cache-Control', 'public, max-age=20, s-maxage=20');
+  response.headers.set('Cache-Control', 'public, max-age=10, s-maxage=30');
+  await putInCache(c, cacheKey, response);
   return response;
 });
 
 app.post('/api/auth/login', async (c) => {
-  const body = await c.req.json<{
-    username?: string;
-    password?: string;
-    loginTarget?: 'staff' | 'pickup' | 'admin' | 'owner';
-    stationId?: number;
-  }>();
-  const staffUsername = (await getSetting(c.env.DB, 'staff_username')) ?? c.env.STAFF_USERNAME ?? 'staff';
-  const staffPasswordHash = (await getSetting(c.env.DB, 'staff_password_hash')) ?? c.env.STAFF_PASSWORD_HASH ?? '';
-  const adminUsername = (await getSetting(c.env.DB, 'admin_username')) ?? c.env.ADMIN_USERNAME ?? 'admin';
-  const ownerUsername = (await getSetting(c.env.DB, 'owner_username')) ?? c.env.OWNER_USERNAME ?? 'owner';
-  const staffPasswordHashFallback = staffPasswordHash;
-  const adminPasswordHash = (await getSetting(c.env.DB, 'admin_password_hash')) ?? c.env.ADMIN_PASSWORD_HASH ?? '';
-  const ownerPasswordHash = (await getSetting(c.env.DB, 'owner_password_hash')) ?? c.env.OWNER_PASSWORD_HASH ?? '';
-  const pickupCredentials = await Promise.all([1, 2, 3, 4].map(async (stationId) => ({
+  if (!c.env.SESSION_SECRET) {
+    console.error(JSON.stringify({ message: 'SESSION_SECRET is not configured', path: '/api/auth/login' }));
+    return c.json(
+      { ok: false, error: { code: 'SERVER_MISCONFIGURED', message: '認証設定が不足しています。管理者に連絡してください。' } },
+      500,
+    );
+  }
+  const parsed = loginSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: 'ログイン情報が不正です。' } }, 400);
+  }
+  const body = parsed.data;
+  const settings = await getSettings(c.env.DB);
+  const setting = (key: string, fallback = '') => settings[key] ?? fallback;
+  // Wrangler Secrets are authoritative. D1 hashes are a legacy fallback and are never returned by an API.
+  const staffUsername = setting('staff_username', c.env.STAFF_USERNAME ?? 'staff');
+  const staffPasswordHash = c.env.STAFF_PASSWORD_HASH ?? setting('staff_password_hash');
+  const adminUsername = setting('admin_username', c.env.ADMIN_USERNAME ?? 'admin');
+  const ownerUsername = setting('owner_username', c.env.OWNER_USERNAME ?? 'owner');
+  const adminPasswordHash = c.env.ADMIN_PASSWORD_HASH ?? setting('admin_password_hash');
+  const ownerPasswordHash = c.env.OWNER_PASSWORD_HASH ?? setting('owner_password_hash');
+  const pickupCredentials = [1, 2, 3, 4].map((stationId) => ({
     stationId: stationId as 1 | 2 | 3 | 4,
-    username: (await getSetting(c.env.DB, `pickup_${stationId}_username`)) ?? (typeof c.env[`PICKUP_${stationId}_USERNAME` as keyof Env] === 'string' ? c.env[`PICKUP_${stationId}_USERNAME` as keyof Env] as string : undefined) ?? `pickup-${stationId}`,
-    passwordHash: (await getSetting(c.env.DB, `pickup_${stationId}_password_hash`)) ?? (typeof c.env[`PICKUP_${stationId}_PASSWORD_HASH` as keyof Env] === 'string' ? c.env[`PICKUP_${stationId}_PASSWORD_HASH` as keyof Env] as string : undefined) ?? '',
-  })));
+    username: setting(
+      `pickup_${stationId}_username`,
+      (typeof c.env[`PICKUP_${stationId}_USERNAME` as keyof Env] === 'string' ? c.env[`PICKUP_${stationId}_USERNAME` as keyof Env] as string : undefined)
+        ?? `pickup-${stationId}`,
+    ),
+    passwordHash: (typeof c.env[`PICKUP_${stationId}_PASSWORD_HASH` as keyof Env] === 'string' ? c.env[`PICKUP_${stationId}_PASSWORD_HASH` as keyof Env] as string : undefined)
+      ?? setting(`pickup_${stationId}_password_hash`),
+  }));
   const selectedPickup = body.loginTarget === 'pickup'
     ? pickupCredentials.find((credential) => credential.stationId === body.stationId)
     : undefined;
@@ -188,7 +403,13 @@ app.post('/api/auth/login', async (c) => {
   const username = body.username ?? selectedUsername ?? '';
   const password = body.password ?? '';
   const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? null;
-  const throttle = await getLoginThrottle(c.env.DB, username, ip);
+  const pickup = pickupCredentials.find((credential) => credential.username === username);
+  const role = username === ownerUsername ? 'owner' : username === adminUsername ? 'admin' : username === staffUsername ? 'staff' : pickup ? 'pickup' : null;
+  const hash = username === ownerUsername ? ownerPasswordHash : username === staffUsername ? staffPasswordHash : username === adminUsername ? adminPasswordHash : pickup?.passwordHash ?? null;
+  const throttleSubject = role === 'pickup'
+    ? `pickup-${pickup?.stationId ?? body.stationId ?? 'unknown'}`
+    : role ?? (body.loginTarget === 'pickup' ? `pickup-${body.stationId ?? 'unknown'}` : body.loginTarget ?? 'unknown');
+  const throttle = await getLoginThrottle(c.env.DB, throttleSubject, ip);
   if (isLoginLocked(throttle)) {
     return c.json(
       {
@@ -201,11 +422,8 @@ app.post('/api/auth/login', async (c) => {
       429,
     );
   }
-  const pickup = pickupCredentials.find((credential) => credential.username === username);
-  const role = username === ownerUsername ? 'owner' : username === adminUsername ? 'admin' : username === staffUsername ? 'staff' : pickup ? 'pickup' : null;
-  const hash = username === ownerUsername ? ownerPasswordHash : username === staffUsername ? staffPasswordHashFallback : username === adminUsername ? adminPasswordHash : pickup?.passwordHash ?? null;
   if (!role || !hash || !(await verifyPassword(password, hash))) {
-    const failure = await recordLoginFailure(c.env.DB, username, ip);
+    const failure = await recordLoginFailure(c.env.DB, throttleSubject, ip);
     return c.json(
       {
         ok: false,
@@ -217,8 +435,8 @@ app.post('/api/auth/login', async (c) => {
       failure.lockedUntil ? 429 : 401,
     );
   }
-  await resetLoginThrottle(c.env.DB, username, ip);
-  const token = await signSession(buildSessionPayload(role, username, role === 'pickup' ? { stationId: pickup?.stationId } : {}), c.env.SESSION_SECRET ?? 'dev-secret');
+  await resetLoginThrottle(c.env.DB, throttleSubject, ip);
+  const token = await signSession(buildSessionPayload(role, username, role === 'pickup' ? { stationId: pickup?.stationId } : {}), c.env.SESSION_SECRET);
   const response = c.json({ ok: true, data: { role } });
   response.headers.set('Set-Cookie', buildSessionCookie(token, new URL(c.req.url).protocol === 'https:'));
   return response;
@@ -239,17 +457,31 @@ app.get('/api/auth/me', async (c) => {
 
 app.post('/api/auth/logout', (c) => {
   const response = c.json({ ok: true, data: { loggedOut: true } });
-  response.headers.set('Set-Cookie', `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${new URL(c.req.url).protocol === 'https:' ? '; Secure' : ''}`);
+  const secure = new URL(c.req.url).protocol === 'https:' ? '; Secure' : '';
+  response.headers.append('Set-Cookie', `session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+  response.headers.append('Set-Cookie', `preview_register_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
   return response;
 });
 
 app.post('/api/staff/register/select', async (c) => {
-  const session = await requireRole(c, ['staff']);
+  const session = await requireRole(c, ['staff', 'admin', 'owner']);
   if (!session) return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
-  const body = await c.req.json<{ registerId?: number }>();
-  const registerId = parseId(String(body.registerId));
+  const parsed = registerSelectionSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ ok: false, error: { code: 'INVALID_REGISTER_ID', message: 'レジ番号が不正です。' } }, 400);
+  const registerId = parseId(String(parsed.data.registerId));
   if (!registerId) return c.json({ ok: false, error: { code: 'INVALID_REGISTER_ID', message: 'レジ番号が不正です。' } }, 400);
-  const token = await signSession(buildSessionPayload('staff', session.username, { registerId }), c.env.SESSION_SECRET ?? 'dev-secret');
+  if (shouldBypassStaffAuth(c.env)) {
+    const response = c.json({ ok: true, data: { registerId, stationId: registerId } });
+    response.headers.set(
+      'Set-Cookie',
+      `preview_register_id=${registerId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${new URL(c.req.url).protocol === 'https:' ? '; Secure' : ''}`,
+    );
+    return response;
+  }
+  if (!c.env.SESSION_SECRET) {
+    return c.json({ ok: false, error: { code: 'SERVER_MISCONFIGURED', message: '認証設定が不足しています。' } }, 500);
+  }
+  const token = await signSession(buildSessionPayload(session.role, session.username, { registerId }), c.env.SESSION_SECRET);
   const response = c.json({ ok: true, data: { registerId, stationId: registerId } });
   response.headers.set('Set-Cookie', buildSessionCookie(token, new URL(c.req.url).protocol === 'https:'));
   return response;
@@ -264,8 +496,9 @@ app.get('/api/staff/register/current', async (c) => {
 app.get('/api/staff/register/recent-sales', async (c) => {
   const session = await requireRole(c, ['staff', 'admin', 'owner']);
   if (!session) return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
-  const registerId = session.role === 'staff' ? session.registerId : parseId(c.req.query('registerId')) ?? session.registerId ?? 1;
-  const items = await listRecentSalesForRegister(c.env.DB, registerId ?? 1, Number(c.req.query('limit') ?? '20'));
+  const registerId = session.role === 'staff' ? session.registerId : parseId(c.req.query('registerId')) ?? session.registerId;
+  if (!registerId) return c.json({ ok: false, error: { code: 'REGISTER_NOT_SELECTED', message: 'レジを選択してください。' } }, 409);
+  const items = await listRecentSalesForRegister(c.env.DB, registerId, parseLimit(c.req.query('limit'), 20, 100));
   return c.json({ ok: true, data: { items } });
 });
 
@@ -273,11 +506,17 @@ app.get('/api/pickup/orders', async (c) => {
   const session = await requireRole(c, ['pickup', 'admin', 'owner']);
   if (!session) return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
   const stationId = session.role === 'pickup' ? session.stationId : parseId(c.req.query('stationId')) ?? undefined;
+  const saleType = getPickupSaleType(stationId);
+  const requestedDate = c.req.query('date');
+  const showUpcomingPresales = stationId === 4 && !requestedDate;
   const items = await listFulfillmentOrders(c.env.DB, {
     stationId,
+    saleType,
+    pickupDate: showUpcomingPresales ? undefined : requestedDate ?? getTokyoDate(),
+    pickupDateFrom: showUpcomingPresales ? getTokyoDate() : undefined,
     includeDelivered: c.req.query('includeDelivered') === 'true',
     query: c.req.query('q'),
-    limit: Math.max(1, Math.min(Number(c.req.query('limit') ?? '100'), 500)),
+    limit: parseLimit(c.req.query('limit'), 100, 500),
   });
   return c.json({ ok: true, data: { items } });
 });
@@ -343,7 +582,7 @@ app.get('/api/admin/fulfillment/orders', async (c) => {
     stationId: parseId(c.req.query('stationId')) ?? undefined,
     includeDelivered: true,
     query: c.req.query('q'),
-    limit: Math.max(1, Math.min(Number(c.req.query('limit') ?? '500'), 1000)),
+    limit: parseLimit(c.req.query('limit'), 100, 500),
   });
   return c.json({ ok: true, data: { items } });
 });
@@ -351,13 +590,11 @@ app.get('/api/admin/fulfillment/orders', async (c) => {
 app.get('/api/admin/fulfillment/summary', async (c) => {
   const session = await requireAdminOrOwner(c);
   if (!session) return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
-  const orders = await listFulfillmentOrders(c.env.DB, { includeDelivered: true, limit: 1000 });
-  const byStation = [1, 2, 3, 4].map((stationId) => {
-    const stationOrders = orders.filter((order) => order.station_id === stationId);
-    return { stationId, pending: stationOrders.filter((order) => order.status === 'pending').length, delivered: stationOrders.filter((order) => order.status === 'delivered').length, canceled: stationOrders.filter((order) => order.status === 'canceled').length };
-  });
-  const connected = await Promise.all([1, 2, 3, 4].map(async (stationId) => ({ stationId, connections: await getRealtimeConnectionCount(c.env.REALTIME_HUB, `station-${stationId}`) })));
-  return c.json({ ok: true, data: { byStation, connected, pending: orders.filter((order) => order.status === 'pending').length, unacknowledgedCanceled: orders.filter((order) => order.status === 'canceled' && !order.cancel_acknowledged_at).length } });
+  const [summary, connected] = await Promise.all([
+    getFulfillmentSummary(c.env.DB),
+    Promise.all([1, 2, 3, 4].map(async (stationId) => ({ stationId, connections: await getRealtimeConnectionCount(c.env.REALTIME_HUB, `station-${stationId}`) }))),
+  ]);
+  return c.json({ ok: true, data: { ...summary, connected } });
 });
 
 app.get('/api/staff/register/products', async (c) => {
@@ -436,14 +673,22 @@ async function handleSaleCheckout(c: Context<{ Bindings: Env }>) {
       },
       401,
     );
-  const salesOpen = (await getSetting(c.env.DB, 'sales_open')) ?? 'true';
+  const settings = await getSettings(c.env.DB);
+  const salesOpen = settings.sales_open ?? 'true';
   if (salesOpen !== 'true') {
     return c.json({ ok: false, error: { code: 'SALES_CLOSED', message: '現在は販売を停止しています。' } }, 409);
   }
-  const registerId = session.registerId ?? 1;
+  if (!session.registerId) {
+    return c.json({ ok: false, error: { code: 'REGISTER_NOT_SELECTED', message: 'レジを選択してください。' } }, 409);
+  }
+  const registerId = session.registerId;
   try {
-    const requestBody = await c.req.json<{ idempotencyKey?: string }>();
-    const result = await processSale(c.env.DB, session.role as 'staff' | 'admin' | 'owner', registerId, requestBody);
+    const requestBody = await c.req.json().catch(() => null);
+    const requestIdempotencyKey = typeof requestBody === 'object' && requestBody !== null && 'idempotencyKey' in requestBody && typeof requestBody.idempotencyKey === 'string'
+      ? requestBody.idempotencyKey
+      : undefined;
+    const salesDay = parseSalesDay(settings.sales_day);
+    const result = await processSale(c.env.DB, session.role as 'staff' | 'admin' | 'owner', registerId, requestBody, { salesDay });
     if ('error' in result) {
       return c.json(
         {
@@ -453,10 +698,7 @@ async function handleSaleCheckout(c: Context<{ Bindings: Env }>) {
         { status: result.error.status },
       );
     }
-    if (!result.reused) {
-      const event = toRealtimeEvent(await getFulfillmentOrderBySale(c.env.DB, result.saleId), 'order.created');
-      if (event) await scheduleRealtimeEvent(c, event);
-    }
+    if (!result.reused) await scheduleRealtimeEvent(c, toCreatedRealtimeEvent(result));
     return c.json({
       ok: true,
       data: {
@@ -464,16 +706,16 @@ async function handleSaleCheckout(c: Context<{ Bindings: Env }>) {
         totalAmount: result.totalAmount,
         paidAmount: result.paidAmount,
         changeAmount: result.changeAmount,
-        idempotencyKey: requestBody.idempotencyKey,
+        idempotencyKey: requestIdempotencyKey,
         registerId: result.registerId,
         stationId: result.stationId,
         pickupCode: result.pickupCode,
         fulfillmentStatus: 'pending',
-        createdAt: new Date().toISOString(),
+        createdAt: result.createdAt,
       },
     });
   } catch (error) {
-    console.error('Checkout failed', error);
+    console.error(JSON.stringify({ message: 'checkout failed', error: String(error) }));
     return c.json(
       { ok: false, error: { code: 'CHECKOUT_FAILED', message: '会計処理に失敗しました。もう一度お試しください。' } },
       500,
@@ -521,14 +763,22 @@ async function handleStockEvent(c: Context<{ Bindings: Env }>) {
       },
       401,
     );
-  const body = await c.req.json<{
-    productId: string;
-    quantityDelta: number;
-    eventType: 'restock' | 'discard' | 'adjust';
-    reason?: string;
-  }>();
-  const result = await recordStockEvent(c.env.DB, session.role as 'admin' | 'owner', body);
-  return c.json({ ok: true, data: result });
+  const parsed = stockEventSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message ?? '在庫変更内容が不正です。' } }, 400);
+  }
+  try {
+    const result = await recordStockEvent(c.env.DB, session.role as 'admin' | 'owner', parsed.data);
+    return c.json({ ok: true, data: result });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') {
+      return c.json({ ok: false, error: { code: 'NOT_FOUND', message: '商品が見つかりません。' } }, 404);
+    }
+    if (error instanceof Error && /CHECK constraint failed:.*current_stock/i.test(error.message)) {
+      return c.json({ ok: false, error: { code: 'INSUFFICIENT_STOCK', message: '在庫数を0未満にはできません。' } }, 409);
+    }
+    throw error;
+  }
 }
 
 app.post('/api/sales/:saleId/cancel', async (c) => {
@@ -542,7 +792,9 @@ app.post('/api/sales/:saleId/cancel', async (c) => {
       401,
     );
   const saleId = c.req.param('saleId');
-  const body = await c.req.json<{ reason?: string; restoreStock?: boolean }>().catch(() => ({}));
+  const parsed = cancelSaleSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: '取消内容が不正です。' } }, 400);
+  const body = parsed.data;
   const result = await cancelSale(c.env.DB, session.role as 'staff' | 'admin' | 'owner', saleId, session.username, session.registerId, body);
   if (!result.ok) {
     return c.json({ ok: false, error: { code: result.code, message: result.message } }, { status: result.status });
@@ -565,7 +817,7 @@ app.get('/api/staff/stock/history', async (c) => {
       },
       401,
     );
-  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? '20'), 100));
+  const limit = parseLimit(c.req.query('limit'), 20, 100);
   const query = c.req.query('q') ?? '';
   const rows = await listStockHistory(c.env.DB, { limit, query });
   return c.json({
@@ -578,111 +830,74 @@ app.get('/api/staff/stock/history', async (c) => {
 
 app.get('/api/admin/products', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
-      },
-      401,
-    );
+  if (!session) return ownerAccessDenied(c);
   const products = await queryProducts(c.env.DB);
-  return c.json({ ok: true, data: { items: products } });
+  return c.json({ ok: true, data: { items: products.map(toAdminProduct) } });
 });
 
 app.get('/api/admin/settings', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
+  if (!session) return ownerAccessDenied(c);
+  const settings = (await getSettingsSnapshot(c.env.DB, EDITABLE_SETTING_NAMES)).values;
+  const safeSettings = sanitizeSettings(settings);
+  return c.json({
+    ok: true,
+    data: {
+      settings: {
+        ...safeSettings,
+        staff_username: safeSettings.staff_username ?? c.env.STAFF_USERNAME ?? 'staff',
+        admin_username: safeSettings.admin_username ?? c.env.ADMIN_USERNAME ?? 'admin',
+        owner_username: safeSettings.owner_username ?? c.env.OWNER_USERNAME ?? 'owner',
+        ...Object.fromEntries([1, 2, 3, 4].map((stationId) => {
+          const key = `pickup_${stationId}_username` as keyof typeof safeSettings;
+          const envValue = c.env[`PICKUP_${stationId}_USERNAME` as keyof Env];
+          return [key, safeSettings[key] ?? (typeof envValue === 'string' ? envValue : `pickup-${stationId}`)];
+        })),
       },
-      401,
-    );
-  const settings = await getSettings(c.env.DB);
-  return c.json({ ok: true, data: { settings } });
+    },
+  });
 });
 
 app.post('/api/admin/products', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
-      },
-      401,
-    );
-  const body = await c.req.json<{
-    id: string;
-    name: string;
-    displayName: string;
-    category?: string;
-    price: number;
-    initialStock: number;
-    isPublic: boolean;
-    isActive: boolean;
-    sortOrder: number;
-    allergyText: string;
-    description: string;
-    note: string;
-  }>();
+  if (!session) return ownerAccessDenied(c);
+  const parsed = productCreateSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: '商品情報が不正です。' } }, 400);
+  }
+  const body = parsed.data;
   const now = new Date().toISOString();
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO products (id, name, display_name, category, price, initial_stock, is_public, is_active, sort_order, allergy_text, description, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name=excluded.name,
-         display_name=excluded.display_name,
-         category=excluded.category,
-         price=excluded.price,
-         initial_stock=excluded.initial_stock,
-         is_public=excluded.is_public,
-         is_active=excluded.is_active,
-         sort_order=excluded.sort_order,
-         allergy_text=excluded.allergy_text,
-         description=excluded.description,
-         note=excluded.note,
-         deleted_at=NULL,
-         updated_at=excluded.updated_at`,
-    ).bind(body.id, body.name, body.displayName, body.category ?? '', body.price, body.initialStock, body.isPublic ? 1 : 0, body.isActive ? 1 : 0, body.sortOrder, body.allergyText, body.description, body.note, now, now),
-    c.env.DB.prepare(
-      `INSERT INTO product_inventory (product_id, current_stock, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(product_id) DO UPDATE SET updated_at=excluded.updated_at`,
-    ).bind(body.id, body.initialStock, now),
-  ]);
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO products (id, name, display_name, category, price, initial_stock, is_public, is_active, sort_order, allergy_text, description, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(body.id, body.name, body.displayName, body.category ?? '', body.price, body.initialStock, body.isPublic ? 1 : 0, body.isActive ? 1 : 0, body.sortOrder, body.allergyText, body.description, body.note, now, now),
+      c.env.DB.prepare(
+        `INSERT INTO product_inventory (product_id, current_stock, updated_at)
+         VALUES (?, ?, ?)`,
+      ).bind(body.id, body.initialStock, now),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE constraint failed:.*products\.id/i.test(error.message)) {
+      return c.json({ ok: false, error: { code: 'PRODUCT_ALREADY_EXISTS', message: '同じ商品IDがすでに存在します。' } }, 409);
+    }
+    throw error;
+  }
   return c.json({ ok: true, data: { updatedAt: now } });
 });
 
 app.put('/api/admin/products/:id', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
-      },
-      401,
-    );
+  if (!session) return ownerAccessDenied(c);
   const id = c.req.param('id');
-  const body = await c.req.json<{
-    name: string;
-    displayName: string;
-    category?: string;
-    price: number;
-    initialStock: number;
-    isPublic: boolean;
-    isActive: boolean;
-    sortOrder: number;
-    allergyText: string;
-    description: string;
-    note: string;
-  }>();
+  const parsed = productFieldsSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: '商品情報が不正です。' } }, 400);
+  }
+  const body = parsed.data;
   const now = new Date().toISOString();
-  await c.env.DB.batch([
+  const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `UPDATE products SET
          name = ?,
@@ -701,47 +916,49 @@ app.put('/api/admin/products/:id', async (c) => {
     ).bind(body.name, body.displayName, body.category ?? '', body.price, body.initialStock, body.isPublic ? 1 : 0, body.isActive ? 1 : 0, body.sortOrder, body.allergyText, body.description, body.note, now, id),
     c.env.DB.prepare(`UPDATE product_inventory SET updated_at = ? WHERE product_id = ?`).bind(now, id),
   ]);
+  if ((results[0]?.meta.changes ?? 0) === 0) {
+    return c.json({ ok: false, error: { code: 'NOT_FOUND', message: '商品が見つかりません。' } }, 404);
+  }
   return c.json({ ok: true, data: { updatedAt: now } });
 });
 
 app.delete('/api/admin/products/:id', async (c) => {
   const session = await requireOwner(c);
-  if (!session) {
-    return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '未ログインです。' } }, 401);
-  }
+  if (!session) return ownerAccessDenied(c);
   const id = c.req.param('id');
-  const body = await c.req.json<{ confirmation?: string }>().catch(() => ({ confirmation: undefined }));
+  const parsed = deleteConfirmationSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: '確認内容が不正です。' } }, 400);
+  const body = parsed.data;
   if (body.confirmation !== '消去') {
     return c.json({ ok: false, error: { code: 'CONFIRMATION_REQUIRED', message: '確認欄に「消去」と入力してください。' } }, 400);
   }
-  const sales = await c.env.DB.prepare('SELECT COUNT(*) AS count FROM sale_items WHERE product_id = ?').bind(id).all<{ count: number }>();
   const now = new Date().toISOString();
-  const product = await c.env.DB.prepare('SELECT id FROM products WHERE id = ?').bind(id).all<{ id: string }>();
-  if (!(product.results ?? []).length) {
+  const result = await c.env.DB.prepare(
+    'UPDATE products SET is_public = 0, is_active = 0, deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL',
+  ).bind(now, now, id).run();
+  if ((result.meta.changes ?? 0) === 0) {
     return c.json({ ok: false, error: { code: 'NOT_FOUND', message: '商品が見つかりません。' } }, 404);
   }
-  if (Number((sales.results ?? [])[0]?.count ?? 0) > 0) {
-    await c.env.DB.prepare('UPDATE products SET is_public = 0, is_active = 0, deleted_at = ?, updated_at = ? WHERE id = ?').bind(now, now, id).run();
-    return c.json({ ok: true, data: { deleted: true, preservedHistory: true, updatedAt: now } });
-  }
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM product_inventory WHERE product_id = ?').bind(id),
-    c.env.DB.prepare('DELETE FROM products WHERE id = ?').bind(id),
-  ]);
-  return c.json({ ok: true, data: { deleted: true, updatedAt: now } });
+  return c.json({ ok: true, data: { deleted: true, preservedHistory: true, updatedAt: now } });
 });
 
 app.post('/api/admin/settings', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
-      },
-      401,
-    );
-  const body = await c.req.json<{ key: string; value: string }>();
+  if (!session) return ownerAccessDenied(c);
+  const parsed = settingEntrySchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: '設定内容が不正です。' } }, 400);
+  }
+  const body = parsed.data;
+  const update = editableSettingsSchema.safeParse({ [body.key]: body.value });
+  if (!update.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: update.error.issues[0]?.message ?? '設定内容が不正です。' } }, 400);
+  }
+  const current = await getSettings(c.env.DB);
+  const thresholds = validateThresholdOrder(update.data, current);
+  if (!thresholds.ok) {
+    return c.json({ ok: false, error: { code: 'INVALID_THRESHOLDS', message: thresholds.message } }, 400);
+  }
   const now = new Date().toISOString();
   await c.env.DB.prepare(
     `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
@@ -754,15 +971,12 @@ app.post('/api/admin/settings', async (c) => {
 
 app.put('/api/admin/settings', async (c) => {
   const session = await requireOwner(c);
-  if (!session)
-    return c.json(
-      {
-        ok: false,
-        error: { code: 'UNAUTHORIZED', message: '未ログインです。' },
-      },
-      401,
-    );
-  const body = await c.req.json<Record<string, string>>();
+  if (!session) return ownerAccessDenied(c);
+  const parsed = editableSettingsSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ ok: false, error: { code: 'INVALID_REQUEST', message: parsed.error.issues[0]?.message ?? '設定内容が不正です。' } }, 400);
+  }
+  const body = parsed.data;
   const now = new Date().toISOString();
   const entries = Object.entries(body);
   if (!entries.length) {
@@ -773,6 +987,11 @@ app.put('/api/admin/settings', async (c) => {
       },
       400,
     );
+  }
+  const current = await getSettings(c.env.DB);
+  const thresholds = validateThresholdOrder(body, current);
+  if (!thresholds.ok) {
+    return c.json({ ok: false, error: { code: 'INVALID_THRESHOLDS', message: thresholds.message } }, 400);
   }
   await c.env.DB.batch(
     entries.map(([key, value]) =>
@@ -803,20 +1022,10 @@ app.get('/api/admin/summary', async (c) => {
       },
       401,
     );
-  const sales = await querySales(c.env.DB);
-  const products = await queryProducts(c.env.DB);
-  const stockEvents = await listStockHistory(c.env.DB, { limit: 500 });
-  const completedSales = sales.filter((sale) => sale.status === 'completed');
-  const totalSales = completedSales.reduce((sum, sale) => sum + sale.total_amount, 0);
-  const totalQuantity = stockEvents.filter((event) => event.event_type === 'sale' || event.event_type === 'presale_pickup').reduce((sum, event) => sum + Math.abs(event.quantity_delta), 0);
+  const summary = await queryAdminSummary(c.env.DB);
   return c.json({
     ok: true,
-    data: {
-      totalSales,
-      completedSales: completedSales.length,
-      totalProducts: products.length,
-      totalQuantity,
-    },
+    data: summary,
   });
 });
 
@@ -831,15 +1040,10 @@ app.get('/api/admin/sales', async (c) => {
       401,
     );
   const query = c.req.query('q') ?? '';
-  const limit = Math.max(1, Math.min(Number(c.req.query('limit') ?? '100'), 500));
+  const limit = parseLimit(c.req.query('limit'), 100, 500);
   const sales = await querySalesByFilter(c.env.DB, { query, limit });
-  const items = await c.env.DB.prepare(`SELECT sale_id, product_id, quantity, unit_price, subtotal FROM sale_items ORDER BY sale_id DESC, id ASC`).all<{
-    sale_id: string;
-    product_id: string;
-    quantity: number;
-    unit_price: number;
-    subtotal: number;
-  }>();
+  const saleIds = sales.map((sale) => sale.id);
+  const items = await querySaleItemsForSales(c.env.DB, saleIds);
   const grouped = new Map<
     string,
     Array<{
@@ -849,13 +1053,7 @@ app.get('/api/admin/sales', async (c) => {
       subtotal: number;
     }>
   >();
-  for (const row of (items.results ?? []) as Array<{
-    sale_id: string;
-    product_id: string;
-    quantity: number;
-    unit_price: number;
-    subtotal: number;
-  }>) {
+  for (const row of items) {
     const list = grouped.get(row.sale_id) ?? [];
     list.push({
       product_id: row.product_id,
@@ -879,63 +1077,23 @@ app.get('/api/admin/sales', async (c) => {
 app.get('/api/admin/export/sales.csv', async (c) => {
   const session = await requireAdminOrOwner(c);
   if (!session) return c.text('unauthorized', 401);
-  const sales = await querySalesByFilter(c.env.DB, { limit: 1000 });
-  const items = await c.env.DB.prepare(
-    `SELECT si.sale_id, si.product_id, p.display_name, si.quantity, si.unit_price, si.subtotal
-       FROM sale_items si
-       JOIN products p ON p.id = si.product_id
-       ORDER BY si.sale_id DESC, si.id ASC`,
-  ).all<{
-    sale_id: string;
-    product_id: string;
-    display_name: string;
-    quantity: number;
-    unit_price: number;
-    subtotal: number;
-  }>();
-  const grouped = new Map<
-    string,
-    Array<{
-      product_id: string;
-      product_name: string;
-      quantity: number;
-      unit_price: number;
-      subtotal: number;
-    }>
-  >();
-  for (const row of (items.results ?? []) as Array<{
-    sale_id: string;
-    product_id: string;
-    display_name: string;
-    quantity: number;
-    unit_price: number;
-    subtotal: number;
-  }>) {
-    const list = grouped.get(row.sale_id) ?? [];
-    list.push({
-      product_id: row.product_id,
-      product_name: row.display_name,
-      quantity: row.quantity,
-      unit_price: row.unit_price,
-      subtotal: row.subtotal,
-    });
-    grouped.set(row.sale_id, list);
-  }
-  const csv = buildSalesCsv(
-    sales.map((sale) => ({
-      ...sale,
-      items: grouped.get(sale.id) ?? [],
-    })),
+  return createCsvResponse(
+    'sales.csv',
+    SALES_CSV_HEADER,
+    (limit, offset) => listSalesCsvPage(c.env.DB, limit, offset),
+    salesCsvLine,
   );
-  return c.text(csv, 200, { 'Content-Type': 'text/csv; charset=utf-8' });
 });
 
 app.get('/api/admin/export/stock-events.csv', async (c) => {
   const session = await requireAdminOrOwner(c);
   if (!session) return c.text('unauthorized', 401);
-  const events = await listStockHistory(c.env.DB, { limit: 1000 });
-  const csv = buildStockEventsCsv(events);
-  return c.text(csv, 200, { 'Content-Type': 'text/csv; charset=utf-8' });
+  return createCsvResponse(
+    'stock-events.csv',
+    STOCK_EVENTS_CSV_HEADER,
+    (limit, offset) => listStockEventsCsvPage(c.env.DB, limit, offset),
+    stockEventCsvLine,
+  );
 });
 
 export { app };

@@ -7,7 +7,7 @@ function base64UrlEncode(input: ArrayBufferLike): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function base64UrlDecode(input: string): Uint8Array {
+function base64UrlDecode(input: string): Uint8Array<ArrayBuffer> {
   const base64 = input.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(input.length / 4) * 4, '=');
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -26,21 +26,21 @@ export async function signSession(payload: SessionPayload, secret: string): Prom
 }
 
 export async function verifySession(token: string, secret: string): Promise<SessionPayload | null> {
-  const [payloadPart, signaturePart] = token.split('.');
-  if (!payloadPart || !signaturePart) return null;
-  const encoder = new TextEncoder();
-  const payloadBytes = base64UrlDecode(payloadPart);
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-  ]);
-  const expected = await crypto.subtle.sign('HMAC', key, payloadBytes as unknown as BufferSource);
-  const actual = base64UrlDecode(signaturePart);
-  if (expected.byteLength !== actual.byteLength) return null;
-  const expectedBytes = new Uint8Array(expected);
-  for (let i = 0; i < expectedBytes.length; i += 1) {
-    if (expectedBytes[i] !== actual[i]) return null;
+  try {
+    const [payloadPart, signaturePart] = token.split('.');
+    if (!payloadPart || !signaturePart) return null;
+    const encoder = new TextEncoder();
+    const payloadBytes = base64UrlDecode(payloadPart);
+    const actual = base64UrlDecode(signaturePart);
+    const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+      'verify',
+    ]);
+    const valid = await crypto.subtle.verify('HMAC', key, actual, payloadBytes);
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as SessionPayload;
+    if (!payload.exp || payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
   }
-  const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as SessionPayload;
-  if (payload.exp < Date.now()) return null;
-  return payload;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { formatYen } from "../../lib/money";
 
 type Product = {
@@ -35,6 +36,8 @@ const CATEGORIES = ["おにぎり", "サイドメニュー", "飲み物"] as con
 type ProductCategory = (typeof CATEGORIES)[number];
 type SaleType = "normal" | "presale_pickup";
 type Phase = "select" | "pay" | "complete";
+const MAX_PAID_AMOUNT_DIGITS = 6;
+const MAX_PAID_AMOUNT = 10 ** MAX_PAID_AMOUNT_DIGITS - 1;
 
 async function readApiResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
@@ -59,7 +62,12 @@ function getCategoryLabel(category: ProductCategory) {
   return category === "飲み物" ? "のみもの" : category;
 }
 
+function formatPickupCode(code: string) {
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+
 export function RegisterPage() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<Product[]>([]);
   const [selected, setSelected] = useState<Record<string, number>>({});
   const [selectedOrder, setSelectedOrder] = useState<string[]>([]);
@@ -75,9 +83,12 @@ export function RegisterPage() {
   const [isCanceling, setIsCanceling] = useState(false);
   const [role, setRole] = useState<"staff" | "admin" | "owner" | null>(null);
   const [registerId, setRegisterId] = useState(1);
+  const [registerReady, setRegisterReady] = useState(false);
+  const [registerError, setRegisterError] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const submittingRef = useRef(false);
+  const loadRequestRef = useRef(0);
   const phaseHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const total = useMemo(
@@ -113,10 +124,11 @@ export function RegisterPage() {
   const canConfirm =
     selectedCount > 0 &&
     total > 0 &&
-    (saleType === "presale_pickup" || paidAmount >= total) &&
+    paidAmount >= total &&
     !isSubmitting;
 
   const load = async () => {
+    const requestId = ++loadRequestRef.current;
     setIsLoading(true);
     try {
       const productsResponse = await fetch("/api/staff/register/products");
@@ -124,6 +136,7 @@ export function RegisterPage() {
         | { ok: true; data: { items: Product[] } }
         | { ok: false; error: { message: string } };
       if (!productsJson.ok) throw new Error(productsJson.error.message);
+      if (requestId !== loadRequestRef.current) return;
       setItems(productsJson.data.items);
       setMessage("");
     } catch (error) {
@@ -133,7 +146,7 @@ export function RegisterPage() {
           : "在庫を再読み込みできませんでした。",
       );
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestRef.current) setIsLoading(false);
     }
   };
 
@@ -152,14 +165,25 @@ export function RegisterPage() {
     void fetch('/api/staff/register/current')
       .then(async (response) => (await response.json()) as { ok: true; data: { registerId: number | null } } | { ok: false })
       .then((json) => {
-        if (json.ok && json.data.registerId) setRegisterId(json.data.registerId);
-      });
-  }, []);
+        if (!json.ok) throw new Error('register lookup failed');
+        if (!json.data.registerId) {
+          navigate('/staff/register/select', { replace: true });
+          return;
+        }
+        setRegisterId(json.data.registerId);
+        setRegisterReady(true);
+      })
+      .catch(() => setRegisterError('レジ情報を確認できませんでした。画面を再読み込みしてください。'));
+  }, [navigate]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     phaseHeadingRef.current?.focus({ preventScroll: true });
   }, [phase]);
+
+  useEffect(() => {
+    setSaleType(registerId === 4 ? "presale_pickup" : "normal");
+  }, [registerId]);
 
   const add = (id: string) => {
     const item = items.find((entry) => entry.id === id);
@@ -190,6 +214,15 @@ export function RegisterPage() {
   };
 
   const deleteItem = (id: string) => {
+    const item = items.find((entry) => entry.id === id);
+    if (
+      !item ||
+      !window.confirm(
+        `${item.displayName}をカートからすべて削除します。よろしいですか？`,
+      )
+    )
+      return;
+
     setSelected((current) => {
       const next = { ...current };
       delete next[id];
@@ -215,6 +248,13 @@ export function RegisterPage() {
     setPhase("pay");
   };
 
+  const appendPaidDigit = (digit: number) => {
+    setPaidAmount((current) => {
+      const next = current * 10 + digit;
+      return next <= MAX_PAID_AMOUNT ? next : current;
+    });
+  };
+
   const confirm = async () => {
     if (!canConfirm || submittingRef.current) return;
     submittingRef.current = true;
@@ -237,8 +277,8 @@ export function RegisterPage() {
         body: JSON.stringify({
           idempotencyKey,
           saleType,
-          paymentMethod: saleType === "normal" ? "cash" : "prepaid",
-          paidAmount: saleType === "normal" ? paidAmount : 0,
+          paymentMethod: "cash",
+          paidAmount,
           items: selectedEntries.map(({ item, quantity }) => ({
             productId: item.id,
             quantity,
@@ -287,7 +327,7 @@ export function RegisterPage() {
   const nextCheckout = () => {
     clear();
     setPaidAmount(0);
-    setSaleType("normal");
+    setSaleType(registerId === 4 ? "presale_pickup" : "normal");
     setReceipt(null);
     setCheckoutError("");
     resetCheckoutKey();
@@ -323,6 +363,19 @@ export function RegisterPage() {
     }
   };
 
+  if (!registerReady) {
+    return (
+      <main className="page page-register register-mode-loading">
+        <section className="register-shell">
+          <div className="register-loading" role="status" aria-live="polite">
+            {registerError || 'レジ情報を確認しています…'}
+            {registerError ? <button type="button" onClick={() => window.location.reload()}>再読み込み</button> : null}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className={`page page-register register-mode-${saleType}`}>
       <section className="register-shell">
@@ -334,27 +387,23 @@ export function RegisterPage() {
             </span>
           </div>
           <span className="register-station-label">受取{registerId} / 色紙 {['赤', '青', '緑', '水色'][registerId - 1]}</span>
-          <div
-            className="register-mode-switch"
-            aria-label="販売モードを切り替える"
-          >
-            <button
-              type="button"
-              onClick={() => setSaleType("normal")}
-              aria-pressed={saleType === "normal"}
-              disabled={phase !== "select"}
+          {registerId === 4 ? (
+            <span className="register-special-mode">前売り専用</span>
+          ) : (
+            <div
+              className="register-mode-switch"
+              aria-label="販売モードを切り替える"
             >
-              通常
-            </button>
-            <button
-              type="button"
-              onClick={() => setSaleType("presale_pickup")}
-              aria-pressed={saleType === "presale_pickup"}
-              disabled={phase !== "select"}
-            >
-              事前販売
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setSaleType("normal")}
+                aria-pressed={saleType === "normal"}
+                disabled={phase !== "select"}
+              >
+                通常
+              </button>
+            </div>
+          )}
           {role === "admin" || role === "owner" ? (
             <a href="/admin">管理画面へ</a>
           ) : null}
@@ -501,28 +550,39 @@ export function RegisterPage() {
                         <span>{formatYen(item.price * quantity)}</span>
                       </div>
                       <div className="cart-actions">
-                        <button
-                          type="button"
-                          onClick={() => remove(item.id)}
-                          aria-label={`${item.displayName} を 1 個減らす`}
-                        >
-                          −
-                        </button>
-                        <strong>{quantity}</strong>
-                        <button
-                          type="button"
-                          onClick={() => add(item.id)}
-                          disabled={quantity >= item.currentStock}
-                          aria-label={`${item.displayName} を 1 個追加する`}
-                        >
-                          ＋
-                        </button>
+                        <div className="cart-stepper">
+                          <button
+                            type="button"
+                            className="cart-step-button"
+                            onClick={() => remove(item.id)}
+                            aria-label={`${item.displayName} を 1 個減らす`}
+                          >
+                            −
+                          </button>
+                          <div
+                            className="cart-quantity"
+                            aria-label={`${item.displayName} の個数`}
+                          >
+                            <span>個数</span>
+                            <strong>{quantity}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            className="cart-step-button"
+                            onClick={() => add(item.id)}
+                            disabled={quantity >= item.currentStock}
+                            aria-label={`${item.displayName} を 1 個追加する`}
+                          >
+                            ＋
+                          </button>
+                        </div>
                         <button
                           type="button"
                           className="cart-delete"
                           onClick={() => deleteItem(item.id)}
+                          aria-label={`${item.displayName}をカートからすべて削除する`}
                         >
-                          削除
+                          ×
                         </button>
                       </div>
                     </div>
@@ -538,7 +598,7 @@ export function RegisterPage() {
                   onClick={startPayment}
                   disabled={!selectedCount || total <= 0}
                 >
-                  {saleType === "normal" ? "会計へ進む" : "受け渡し確認へ"}
+                  {saleType === "normal" ? "会計へ進む" : "前売り会計へ"}
                 </button>
                 <button
                   type="button"
@@ -556,15 +616,13 @@ export function RegisterPage() {
             <div className="register-panel register-confirm register-pay-left">
               <div className="section-head">
                 <h2 ref={phaseHeadingRef} tabIndex={-1}>
-                  {saleType === "normal" ? "お会計" : "受け渡し確認"}
+                  {saleType === "normal" ? "お会計" : "前売り会計"}
                 </h2>
               </div>
               <div className="checkout-overview">
                 <div className="checkout-total">
                   <span>
-                    {saleType === "normal"
-                      ? "今回のお会計"
-                      : "受け渡し商品の合計"}
+                      {saleType === "normal" ? "今回のお会計" : "前売り券の合計"}
                   </span>
                   <strong>{formatYen(total)}</strong>
                   <small>{selectedCount}点</small>
@@ -596,13 +654,15 @@ export function RegisterPage() {
                   </>
                 ) : (
                   <div className="checkout-guidance is-presale">
-                    <strong>事前支払い済み</strong>
-                    <span>商品を確認して受け渡しを確定してください</span>
+                    <strong>前日に現金を受け取ります</strong>
+                    <span>おつりを確認して前売り券を発行してください</span>
                   </div>
                 )}
               </div>
-              <details className="checkout-items">
-                <summary>商品明細を見る（{selectedCount}点）</summary>
+              <section className="checkout-items" aria-labelledby="checkout-items-heading">
+                <div className="checkout-items-heading" id="checkout-items-heading">
+                  今回の注文内容（{selectedCount}点）
+                </div>
                 <div className="receipt receipt-inline">
                   <div className="receipt-items">
                     {selectedEntries.map(({ item, quantity }) => (
@@ -618,11 +678,10 @@ export function RegisterPage() {
                     ))}
                   </div>
                 </div>
-              </details>
+              </section>
             </div>
             <div className="register-panel register-pay-right">
-              {saleType === "normal" ? (
-                <div className="payment-box">
+              <div className="payment-box">
                   <label>
                     <span className="payment-label">受け取った金額を入力</span>
                     <input
@@ -631,7 +690,11 @@ export function RegisterPage() {
                       value={formatYen(paidAmount)}
                       readOnly
                       aria-label="預かり金額"
+                      aria-describedby="paid-amount-limit"
                     />
+                    <small id="paid-amount-limit" className="payment-input-hint">
+                      最大{MAX_PAID_AMOUNT_DIGITS}桁
+                    </small>
                   </label>
                   <div className="payment-shortcuts">
                     <button type="button" onClick={() => setPaidAmount(total)}>
@@ -652,9 +715,8 @@ export function RegisterPage() {
                       <button
                         type="button"
                         key={digit}
-                        onClick={() =>
-                          setPaidAmount((current) => current * 10 + digit)
-                        }
+                        onClick={() => appendPaidDigit(digit)}
+                        disabled={paidAmount * 10 + digit > MAX_PAID_AMOUNT}
                       >
                         {digit}
                       </button>
@@ -664,7 +726,8 @@ export function RegisterPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPaidAmount((current) => current * 10)}
+                      onClick={() => appendPaidDigit(0)}
+                      disabled={paidAmount * 10 > MAX_PAID_AMOUNT}
                     >
                       0
                     </button>
@@ -677,8 +740,7 @@ export function RegisterPage() {
                       ⌫
                     </button>
                   </div>
-                </div>
-              ) : null}
+              </div>
               {checkoutError ? (
                 <div className="checkout-error" role="alert">
                   <strong>確定できませんでした</strong>
@@ -714,7 +776,7 @@ export function RegisterPage() {
                     ? "確定中…"
                     : saleType === "normal"
                       ? "お会計確定"
-                      : "受け渡し確定"}
+                      : "前売り券を発行"}
                 </button>
               </div>
             </div>
@@ -722,41 +784,33 @@ export function RegisterPage() {
         ) : (
           <section className="register-panel register-complete">
             <h2 ref={phaseHeadingRef} tabIndex={-1}>
-              {saleType === "normal"
-                ? "会計が完了しました"
-                : "受け渡しを記録しました"}
+              {saleType === "normal" ? "会計が完了しました" : "前売り券を発行しました"}
             </h2>
             {receipt ? (
               <>
                 <p className="complete-instruction">
-                  {saleType === "normal"
-                    ? receipt.changeAmount > 0
-                      ? <><span>おつりは</span> <strong>{formatYen(receipt.changeAmount)}</strong> <span>です。</span></>
-                      : "おつりはありません"
-                    : "商品をお渡しください"}
+                  {receipt.changeAmount > 0
+                    ? <><span>おつりは</span> <strong>{formatYen(receipt.changeAmount)}</strong> <span>です。</span></>
+                    : "おつりはありません"}
                 </p>
                 <div className="receipt">
                   <div className="receipt-order-code">
                     <span>注文番号</span>
-                    <strong>{receipt.pickupCode}</strong>
+                    <strong>{formatPickupCode(receipt.pickupCode)}</strong>
                   </div>
                   <div className="receipt-meta">
                     <p>
                       <span>合計</span>
                       <strong>{formatYen(receipt.totalAmount)}</strong>
                     </p>
-                    {saleType === "normal" ? (
-                      <>
-                        <p>
-                          <span>預かり</span>
-                          <strong>{formatYen(receipt.paidAmount)}</strong>
-                        </p>
-                        <p>
-                          <span>おつり</span>
-                          <strong>{formatYen(receipt.changeAmount)}</strong>
-                        </p>
-                      </>
-                    ) : null}
+                    <p>
+                      <span>預かり</span>
+                      <strong>{formatYen(receipt.paidAmount)}</strong>
+                    </p>
+                    <p>
+                      <span>おつり</span>
+                      <strong>{formatYen(receipt.changeAmount)}</strong>
+                    </p>
                   </div>
                 </div>
               </>
@@ -770,7 +824,7 @@ export function RegisterPage() {
               >
                 次の会計へ
               </button>
-              {(role === "staff" || role === "admin" || role === "owner") && receipt ? (
+              {saleType === "normal" && (role === "staff" || role === "admin" || role === "owner") && receipt ? (
                 <button
                   type="button"
                   className="danger-secondary"

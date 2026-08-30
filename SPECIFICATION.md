@@ -24,7 +24,7 @@
 | ロール | 主な利用者 | 主な責務 |
 | --- | --- | --- |
 | `public` | 一般客 | 商品、価格、アレルギー、在庫段階の閲覧 |
-| `staff` | レジ担当 | 商品選択、会計、事前販売の受け渡し |
+| `staff` | レジ担当 | 商品選択、会計、前売り券の販売 |
 | `admin` | 運用担当 | `staff` の機能、在庫操作、販売履歴、集計、CSV |
 | `owner` | 管理担当 | `admin` の機能、商品マスタ、公開設定、アカウント設定 |
 
@@ -120,12 +120,23 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 
 - 通常販売と事前販売を切り替える
 - 通常販売は現金のみ。預かり金額が合計以上である必要がある
-- 事前販売は前払い済み扱い。支払額は 0、支払方法は `prepaid` とする
+- 事前販売は1日目に現金を受け取る。支払方法は `cash` とし、合計以上の預かり金額が必要
+- レジ1〜3は通常販売専用、レジ4は前売り販売専用。APIでも販売種別とレジ番号を検証する
 - 預かり金額から釣銭を計算する
 - 確定時にレシート情報と販売 ID を表示する
 - 二重送信を防ぐため、会計単位で UUID の冪等キーを生成する
 - 通信再試行時に同じ冪等キーが送られた場合、同じ販売結果を返す
 - 管理権限を持つ利用者は、完了画面から販売取消を実行できる
+
+#### 商品の受取 `/pickup`
+
+- 受取1〜3は対応するレジの通常注文、受取4は前売り注文を一覧表示する
+- 受取1〜3は当日が受取対象の注文だけを一覧表示し、受取4は予約確認のため本日以降が受取対象の前売り注文を一覧表示する
+- 受取4の翌日以降の予約には受取日を表示し、受取済み操作は日本時間の受取日以降だけ許可する（APIでも検証する）
+- 4文字の通常注文番号または6文字の前売りID、商品名で一覧を検索できる
+- 注文内容を確認してから受取済みに更新する
+- 受取済みIDは再度受け取れず、前売り注文はキャンセルできない
+- 前売りIDと販売・受取イベントは削除せず保持する
 
 ### 3.4 在庫 `/staff/stock`
 
@@ -155,7 +166,8 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - 商品の名前、表示名、価格、初期在庫、公開フラグ、販売中フラグ、並び順、アレルギー、説明、注記の編集
 - 公開状態の ON/OFF
 - 販売状態の ON 操作
-- 店舗名、ログイン名、パスワードハッシュ、在庫しきい値などの設定保存
+- 店舗名、ログイン名、在庫しきい値などの設定保存
+- パスワードハッシュはブラウザへ返さず、Cloudflare Secrets で管理
 - 在庫 CSV、売上 CSV、在庫イベント CSV の取得・ダウンロード
 
 商品マスタと設定の API は `owner` のみ、販売履歴・集計・CSV・在庫操作は `admin` または `owner` のみが実行できます。
@@ -170,17 +182,18 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - 属性は `Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`
 - HTTPS 時は `Secure` を付加する
 - ログアウトは Cookie の有効期限を 0 にして破棄する
-- セッション署名鍵は `SESSION_SECRET` を使用し、未設定時だけ開発用既定値にフォールバックする
+- セッション署名鍵は `SESSION_SECRET` を使用し、未設定時はログインを拒否する
 
 ### 4.2 資格情報の解決順
 
-ユーザー名とパスワードハッシュは、原則として D1 `settings` を先に参照し、なければ Cloudflare 環境変数を参照します。
+ユーザー名は D1 `settings` を先に参照し、なければ Cloudflare 環境変数を参照します。パスワードハッシュは Cloudflare Secrets を正とし、移行互換性のため Secret が未設定の場合に限って既存の D1 設定へフォールバックします。D1 のパスワードハッシュは管理 API から取得・更新できません。
 
 | ロール | 設定キー / 環境変数 |
 | --- | --- |
-| staff | `staff_username` / `STAFF_USERNAME`、`staff_password_hash` / `STAFF_PASSWORD_HASH` |
-| admin | `admin_username` / `ADMIN_USERNAME`、`admin_password_hash` / `ADMIN_PASSWORD_HASH` |
-| owner | `owner_username` / `OWNER_USERNAME`、`owner_password_hash` / `OWNER_PASSWORD_HASH` |
+| staff | `staff_username` / `STAFF_USERNAME`、`STAFF_PASSWORD_HASH` |
+| admin | `admin_username` / `ADMIN_USERNAME`、`ADMIN_PASSWORD_HASH` |
+| owner | `owner_username` / `OWNER_USERNAME`、`OWNER_PASSWORD_HASH` |
+| pickup 1〜4 | `pickup_N_username` / `PICKUP_N_USERNAME`、`PICKUP_N_PASSWORD_HASH` |
 
 パスワードは平文保存せず、`verifyPassword` でハッシュと照合します。
 
@@ -242,7 +255,7 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - 商品 ID は空文字不可、数量は正の整数
 - 商品価格は DB の現在値を使い、クライアントの価格は信用しない
 - 通常販売は `paymentMethod=cash` かつ `paidAmount >= totalAmount`
-- 事前販売は `paymentMethod=prepaid` かつ `paidAmount=0`
+- 事前販売は `paymentMethod=cash` かつ `paidAmount >= totalAmount`
 - 在庫不足は HTTP 409
 - 商品不存在は HTTP 404
 - 入力不正、支払方法不一致、支払不足は HTTP 400
@@ -298,7 +311,7 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 
 - `idempotency_key` は UNIQUE
 - `sale_type`: `normal` または `presale_pickup`
-- `payment_method`: `cash` または `prepaid`
+- `payment_method`: `cash` または `prepaid`（新規の前売りは `cash`）
 - `status`: `completed` または `canceled`
 - `total_amount`、`paid_amount`、`change_amount` は円単位
 - `created_by_role`: `staff`、`admin`、`owner`
@@ -329,17 +342,21 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - `shop_name`
 - `public_status_enabled`
 - `sales_open`
+- `sales_day`（`all` / `day1` / `day2`）
 - `timezone`
 - `threshold_low` / `threshold_mid` / `threshold_high`
-- `staff_username` / `staff_password_hash`
-- `admin_username` / `admin_password_hash`
-- `owner_username` / `owner_password_hash`
+- `staff_username`
+- `admin_username`
+- `owner_username`
+- `pickup_1_username` 〜 `pickup_4_username`
+
+パスワードハッシュは Cloudflare Secrets で管理し、このテーブルの編集対象には含めません。
 
 ### 6.7 `login_attempts`
 
 ログイン試行制限用です。
 
-- 主キーは `username:ip` 形式の `throttle_key`
+- 主キーは、ロールまたはログイン対象と送信元 IP を組み合わせた `throttle_key`
 - `failed_count` に失敗回数を保存する
 - 5 回目の失敗から 15 分間ロックする
 - 正常ログイン時に該当レコードを削除する
@@ -349,12 +366,12 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 | ファイル | 役割 |
 | --- | --- |
 | `0001_initial.sql` | 基本テーブル、制約、インデックスの作成 |
-| `0002_seed_example.sql` | 既存テーブルを再作成し、例示商品・設定を投入 |
+| `0002_seed_example.sql` | 既存スキーマを保持したまま、例示商品・設定を投入 |
 | `0003_login_attempts.sql` | ログイン試行制限テーブル追加 |
 | `0004_public_menu_refresh.sql` | 商品カテゴリ追加、公開用メニューを投入 |
 | `0005_allow_staff_sale_records.sql` | 販売・在庫イベントの作成者に `staff` を許可 |
 
-`0002_seed_example.sql` は既存テーブルを DROP して再作成する内容を含むため、既存データを保持したまま本番適用する用途には注意が必要です。適用前に対象 DB と migration 状態を確認してください。
+`0002_seed_example.sql` は既存テーブルを削除せず、例示データを `INSERT OR IGNORE` で投入します。すでに旧版の `0002` を適用した環境では、ファイルを変更しても適用済みのSQLは再実行されないため、migration履歴を確認してください。
 
 ## 8. Cloudflare 運用仕様
 
@@ -365,7 +382,7 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - D1 バインディング: `DB`
 - 本番環境と `preview` 環境にそれぞれ D1 を設定
 - preview では `PREVIEW_AUTH_BYPASS=true` を設定
-- 本番パスワードハッシュ、セッション秘密鍵などは Secret または D1 設定で管理する
+- 本番パスワードハッシュとセッション秘密鍵は Cloudflare Secrets で管理する
 
 主要コマンド:
 
@@ -415,7 +432,7 @@ npm run build
 
 1. `plan.md` ではスタッフの在庫操作や CSV 出力を広く想定していますが、現行 API の在庫・履歴・CSV は `admin` / `owner` のみです。`staff` はレジ利用に限定されています。
 2. `plan.md` のロール説明では `admin` が販売履歴・在庫を担当し、`owner` が商品・公開設定を担当する構成ですが、画面 URL は複数とも同一 `AdminPage` に集約されています。最終的な制御は API のロールチェックが担います。
-3. `sales_open` 設定は保存・表示できますが、現行の会計 API で販売受付を停止する判定には使われていません。販売停止を実効化する場合は `handleSaleCheckout` または `processSale` にチェックを追加する必要があります。
+3. `sales_open` は会計APIで確認され、販売受付を停止できます。`sales_day` は `all`（制限なし）、`day1`（前売り券のみ）、`day2`（通常販売のみ）を選択でき、会計API側でも販売種別を検証します。
 4. `POST /api/admin/products` は新規商品作成時に在庫レコードを作成しますが、既存商品更新時は現在在庫を初期在庫へ戻さず、在庫更新時刻だけを更新します。初期在庫変更の意味を運用ルールとして明確化する必要があります。
 5. 公開 API は `public_status_enabled=false` でも商品データを返し、UI が「公開停止中」と表示する方式です。完全に非公開にする要件なら、停止時のレスポンス設計を見直します。
 6. `0002_seed_example.sql` は DROP/CREATE を含むため、本番 DB に適用する場合は破壊的変更として扱います。
@@ -428,7 +445,7 @@ npm run build
 - 一般客が `/` で商品と段階在庫を確認できる
 - staff がログインして会計できる
 - 通常販売の支払不足、在庫不足、二重送信が適切に拒否される
-- 事前販売の受け渡しを `prepaid` として記録できる
+- 前売りを1日目に現金販売し、6文字のIDで2日目に検索・受取済み記録できる
 - admin / owner が在庫を補充・廃棄・補正できる
 - admin / owner が販売履歴、集計、CSV を確認できる
 - owner が商品、公開設定、しきい値、アカウント設定を変更できる

@@ -26,38 +26,46 @@ export function shouldBypassStaffAuth(env: { PREVIEW_AUTH_BYPASS?: string; CF_PA
   return env.PREVIEW_AUTH_BYPASS === 'true' && Boolean(env.CF_PAGES_BRANCH) && env.CF_PAGES_BRANCH !== 'main';
 }
 
-function getThrottleKey(username: string, ip: string | null): string {
-  return `${username}:${ip ?? 'unknown'}`;
+function getThrottleKey(subject: string, ip: string | null): string {
+  return `${subject}:${ip ?? 'unknown'}`;
 }
 
-export async function getLoginThrottle(db: D1Database, username: string, ip: string | null): Promise<LoginThrottleState | null> {
-  const key = getThrottleKey(username, ip);
+export async function getLoginThrottle(db: D1Database, subject: string, ip: string | null): Promise<LoginThrottleState | null> {
+  const key = getThrottleKey(subject, ip);
   const rows = await db.prepare('SELECT failed_count as failedCount, locked_until as lockedUntil, updated_at as updatedAt FROM login_attempts WHERE throttle_key = ?').bind(key).all<LoginThrottleState>();
   return (rows.results ?? [])[0] ?? null;
 }
 
-export async function recordLoginFailure(db: D1Database, username: string, ip: string | null): Promise<{ lockedUntil: string | null }> {
-  const key = getThrottleKey(username, ip);
-  const current = await getLoginThrottle(db, username, ip);
-  const failedCount = (current?.failedCount ?? 0) + 1;
+export async function recordLoginFailure(db: D1Database, subject: string, ip: string | null): Promise<{ lockedUntil: string | null }> {
+  const key = getThrottleKey(subject, ip);
   const now = new Date().toISOString();
-  const lockedUntil = failedCount >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCK_MINUTES * 60 * 1000).toISOString() : null;
-  await db
-    .prepare(
+  const nextLockedUntil = new Date(Date.now() + LOCK_MINUTES * 60 * 1000).toISOString();
+  const staleBefore = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const results = await db.batch<LoginThrottleState>([
+    db.prepare('DELETE FROM login_attempts WHERE updated_at < ?').bind(staleBefore),
+    db.prepare(
       `INSERT INTO login_attempts (throttle_key, failed_count, locked_until, updated_at)
-       VALUES (?, ?, ?, ?)
+       VALUES (?, 1, NULL, ?)
        ON CONFLICT(throttle_key) DO UPDATE SET
-         failed_count = excluded.failed_count,
-         locked_until = excluded.locked_until,
-         updated_at = excluded.updated_at`,
+         failed_count = CASE
+           WHEN login_attempts.locked_until IS NOT NULL AND login_attempts.locked_until <= excluded.updated_at THEN 1
+           ELSE login_attempts.failed_count + 1
+         END,
+         locked_until = CASE
+           WHEN login_attempts.locked_until IS NOT NULL AND login_attempts.locked_until <= excluded.updated_at THEN NULL
+           WHEN login_attempts.failed_count + 1 >= ? THEN ?
+           ELSE login_attempts.locked_until
+         END,
+         updated_at = excluded.updated_at
+       RETURNING failed_count AS failedCount, locked_until AS lockedUntil, updated_at AS updatedAt`,
     )
-    .bind(key, failedCount, lockedUntil, now)
-    .run();
-  return { lockedUntil };
+      .bind(key, now, MAX_FAILED_ATTEMPTS, nextLockedUntil),
+  ]);
+  return { lockedUntil: results[1]?.results?.[0]?.lockedUntil ?? null };
 }
 
-export async function resetLoginThrottle(db: D1Database, username: string, ip: string | null): Promise<void> {
-  const key = getThrottleKey(username, ip);
+export async function resetLoginThrottle(db: D1Database, subject: string, ip: string | null): Promise<void> {
+  const key = getThrottleKey(subject, ip);
   await db.prepare('DELETE FROM login_attempts WHERE throttle_key = ?').bind(key).run();
 }
 

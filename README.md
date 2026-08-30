@@ -24,30 +24,62 @@ npm run test
 
 ## Cloudflare
 
-`wrangler.jsonc` に D1 の `database_id` を設定しています。公開前に実際の環境へ合わせてください。
+Cloudflare Pages / D1 の設定は `wrangler.jsonc`、受取画面のリアルタイム通知に使う Durable Object Worker の設定は `wrangler.realtime.jsonc` を正とします。
 
 ```bash
-npm run db:migrate:local
+npm exec wrangler whoami
+npm exec wrangler pages project list
+npm run db:migrations:list:remote
+npm run cf:secrets:list
+```
+
+本番用 Pages Secret には次の値が必要です。
+
+- `STAFF_USERNAME`
+- `STAFF_PASSWORD_HASH`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD_HASH`
+- `OWNER_USERNAME`
+- `OWNER_PASSWORD_HASH`
+- `PICKUP_1_USERNAME` 〜 `PICKUP_4_USERNAME`
+- `PICKUP_1_PASSWORD_HASH` 〜 `PICKUP_4_PASSWORD_HASH`
+- `SESSION_SECRET`
+
+不足する Secret は値をコマンドライン引数に含めず、対話入力で登録します。
+
+```bash
+npm exec wrangler pages secret put SECRET_NAME --project-name gakuyusai
+```
+
+### デプロイ前検証
+
+```bash
+npm ci
+npm run cf:preflight
+```
+
+`cf:preflight` は型検査、lint、単体テスト、フロントエンドビルド、Pages Functions のビルド、Realtime Worker の strict dry-run を順番に実行します。Cloudflare 上のリソースは変更しません。
+
+### 本番デプロイ
+
+未適用 migration の SQL を確認し、破壊的変更がないことを確認してから実行します。
+
+```bash
+npm run db:migrations:list:remote
 npm run cf:deploy
 ```
 
+`cf:deploy` は preflight の完了後、D1 migration、`gakuyusai-realtime` Worker、`main` ブランチの Pages デプロイの順に反映します。Pages の `REALTIME_HUB` は別 Worker を参照するため、この順序を変更しないでください。
+
 ### 初期ログイン情報
 
-本番の初期ログインは Cloudflare Pages Secret と D1 `settings` の両方で管理します。
+本番の初期ログインは Cloudflare Pages Secret で管理します。平文パスワードは受け付けないため、`*_PASSWORD_HASH` にはアプリの PBKDF2 形式のハッシュを登録してください。
 
 - `staff` -> `/staff/register`
 - `admin` -> `/staff/register`
 - `owner` -> `/admin`
 
-初期パスワードはランダム生成済みです。運用時は必要に応じて管理画面 `/admin` から変更してください。
-
-現在の初期値:
-
-- `staff` / `admin` / `owner` の3系統を利用
-- `staff` と `admin` はレジ用
-- `owner` は管理用
-
-Cloudflare へ反映する場合は、`pages secret put` と `wrangler d1 execute --remote` で `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` / `OWNER_USERNAME` / `OWNER_PASSWORD_HASH` / `SESSION_SECRET` を更新してください。
+`staff` はレジ、`admin` は販売履歴・在庫・CSV、`owner` はそれらに加えて商品・公開設定を管理します。受取窓口 1〜4 を含むユーザー名は `/admin`、パスワードハッシュは `PICKUP_1_PASSWORD_HASH` 〜 `PICKUP_4_PASSWORD_HASH` などの Cloudflare Pages Secret で設定します。
 
 ## 画面
 
