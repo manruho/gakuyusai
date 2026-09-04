@@ -2387,9 +2387,6 @@ textarea {
 }
 
 .notice-board {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
   margin: 14px 0;
 }
 
@@ -2402,9 +2399,15 @@ textarea {
 
 .notice strong {
   display: block;
-  margin-bottom: 4px;
-  font-size: 18px;
+  font-size: clamp(13px, 4vw, 18px);
   font-weight: 950;
+}
+
+.notice-line {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .notice span {

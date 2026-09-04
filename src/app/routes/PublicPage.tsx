@@ -122,6 +122,9 @@ export function PublicPage() {
 
   const soldOutCount = data.items.filter((item) => item.isSoldOut).length;
   const visibleItems = data.items.filter((item) => normalizeCategory(item) === selectedCategory);
+  const restockMessage = data.noonRestockedAt
+    ? `${formatHourMinuteJst(data.noonRestockedAt)}に在庫を追加しました！`
+    : '12:00ごろに在庫追加予定';
 
   return (
     <main className="page page-public">
@@ -137,13 +140,8 @@ export function PublicPage() {
 
         <section className="notice-board" aria-label="販売情報">
           <div className="notice">
-            <strong>売り切れ{soldOutCount}件</strong>
-          </div>
-          <div className="notice">
-            <strong>
-              {data.noonRestockedAt
-                ? `${formatHourMinuteJst(data.noonRestockedAt)}に在庫を追加しました！`
-                : '12:00ごろに在庫追加予定'}
+            <strong className="notice-line">
+              {`売り切れ${soldOutCount}件　${restockMessage}`}
             </strong>
           </div>
         </section>

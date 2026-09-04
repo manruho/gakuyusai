@@ -36,8 +36,7 @@ describe('PublicPage allergy information', () => {
     expect(screen.getByText('海苔には小麦・大豆が含まれます。')).toBeVisible();
     expect(screen.queryByText('追加トッピング')).not.toBeInTheDocument();
     expect(screen.queryByText('販売状況とアレルギーをすぐ確認できます')).not.toBeInTheDocument();
-    expect(screen.getByText('売り切れ0件')).toBeVisible();
-    expect(screen.getByText('12:00ごろに在庫追加予定')).toBeVisible();
+    expect(screen.getByText(/売り切れ0件.*12:00ごろに在庫追加予定/)).toBeVisible();
     expect(await screen.findByText('アレルギー: 小麦・大豆・さば')).toBeVisible();
   });
 
@@ -55,7 +54,7 @@ describe('PublicPage allergy information', () => {
 
     render(<PublicPage />);
 
-    expect(await screen.findByText('12:34に在庫を追加しました！')).toBeVisible();
+    expect(await screen.findByText(/売り切れ0件.*12:34に在庫を追加しました！/)).toBeVisible();
     expect(screen.queryByText('12:00ごろに在庫追加予定')).not.toBeInTheDocument();
   });
 });
