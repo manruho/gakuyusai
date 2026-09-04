@@ -18,6 +18,7 @@ export type PublicStatusItem = {
 export type PublicStatusResponse = {
   shopName: string;
   updatedAt: string;
+  noonRestockedAt: string | null;
   items: PublicStatusItem[];
   isPublicEnabled: boolean;
 };

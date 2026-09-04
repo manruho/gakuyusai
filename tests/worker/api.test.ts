@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../worker/app';
+import { getTokyoDate } from '../../worker/services/fulfillmentService';
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const context = createExecutionContext();
@@ -61,6 +62,36 @@ describe('Workers API with a real D1 binding', () => {
     const uncached = await (await request(path)).text();
     expect(cached).toBe(before);
     expect(uncached).not.toBe(before);
+  });
+
+  it('exposes the time of todays noon restock without exposing stock counts', async () => {
+    const eventId = 'stock_event_public_noon_restock_status';
+    const appliedAt = new Date().toISOString();
+    const cache = await caches.open('gakuyusai-public-status-v1');
+    const cacheKey = new Request('https://worker.test/api/public/status');
+    await cache.delete(cacheKey);
+    await env.DB.prepare(
+      `INSERT INTO stock_events (
+         id, product_id, event_type, quantity_delta, reason, created_by_role, created_at
+       ) VALUES (?, ?, 'restock', ?, ?, 'admin', ?)`,
+    ).bind(
+      eventId,
+      'onigiri_shio',
+      35,
+      `12時一括補充（${getTokyoDate()}）`,
+      appliedAt,
+    ).run();
+
+    try {
+      const response = await request('/api/public/status');
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        data: { noonRestockedAt: appliedAt },
+      });
+    } finally {
+      await env.DB.prepare('DELETE FROM stock_events WHERE id = ?').bind(eventId).run();
+      await cache.delete(cacheKey);
+    }
   });
 
   it('returns 403 for an authenticated admin calling owner-only APIs', async () => {

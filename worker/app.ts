@@ -318,13 +318,23 @@ app.get('/api/public/status', async (c) => {
   const cache = await caches.open('gakuyusai-public-status-v1');
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
-  const products = await queryProducts(c.env.DB, true);
-  const settingsSnapshot = await getSettingsSnapshot(c.env.DB, [
-    'public_status_enabled',
-    'shop_name',
-    'threshold_low',
-    'threshold_mid',
-    'threshold_high',
+  const businessDate = getTokyoDate();
+  const [products, settingsSnapshot, noonRestock] = await Promise.all([
+    queryProducts(c.env.DB, true),
+    getSettingsSnapshot(c.env.DB, [
+      'public_status_enabled',
+      'shop_name',
+      'threshold_low',
+      'threshold_mid',
+      'threshold_high',
+    ]),
+    c.env.DB.prepare(
+      `SELECT created_at
+       FROM stock_events
+       WHERE event_type = 'restock' AND reason = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    ).bind(`12時一括補充（${businessDate}）`).first<{ created_at: string }>(),
   ]);
   const settings = settingsSnapshot.values;
   const isPublicEnabled = settings.public_status_enabled !== 'false';
@@ -335,6 +345,7 @@ app.get('/api/public/status', async (c) => {
     data: {
       shopName,
       updatedAt: latestUpdatedAt(products, settingsSnapshot.updatedAt),
+      noonRestockedAt: noonRestock?.created_at ?? null,
       isPublicEnabled,
       items: (isPublicEnabled ? products : []).map((item) => {
         const statusLevel = getStockLevelWithThresholds(item.current_stock, item.initial_stock, thresholds);

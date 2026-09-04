@@ -15,3 +15,12 @@ export function formatMonthDayTimeJst(value: string): string {
     timeZone: 'Asia/Tokyo',
   }).format(new Date(value));
 }
+
+export function formatHourMinuteJst(value: string): string {
+  return new Intl.DateTimeFormat('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'Asia/Tokyo',
+  }).format(new Date(value));
+}

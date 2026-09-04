@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { formatMonthDayTimeJst } from '../../lib/date';
+import { formatHourMinuteJst } from '../../lib/date';
 import { formatYen } from '../../lib/money';
 import type { PublicStatusItem, PublicStatusResponse } from '../../lib/types';
 import './PublicPage.css';
@@ -10,6 +10,7 @@ type PublicCategory = (typeof CATEGORIES)[number];
 const fallback: PublicStatusResponse = {
   shopName: '文化祭食品販売',
   updatedAt: '',
+  noonRestockedAt: null,
   items: [],
   isPublicEnabled: true,
 };
@@ -112,7 +113,7 @@ export function PublicPage() {
       }
     };
     void load();
-    const timer = window.setInterval(load, 120000);
+    const timer = window.setInterval(load, 30_000);
     return () => {
       mounted = false;
       window.clearInterval(timer);
@@ -130,19 +131,20 @@ export function PublicPage() {
             <span className="onigiri-mark" aria-hidden="true" />
             <span className="title-text">
               {data.shopName}
-              <small>販売状況とアレルギーをすぐ確認できます</small>
             </span>
           </h1>
         </header>
 
         <section className="notice-board" aria-label="販売情報">
           <div className="notice">
-            <strong>{data.updatedAt ? formatMonthDayTimeJst(data.updatedAt) : '未取得'}</strong>
-            <span>{data.updatedAt ? '販売状況を更新しました' : '販売状況を取得できていません'}</span>
+            <strong>売り切れ{soldOutCount}件</strong>
           </div>
           <div className="notice">
-            <strong>{data.isPublicEnabled ? '公開中' : '停止中'}</strong>
-            <span>売り切れ {data.updatedAt ? soldOutCount : '—'}品</span>
+            <strong>
+              {data.noonRestockedAt
+                ? `${formatHourMinuteJst(data.noonRestockedAt)}に在庫を追加しました！`
+                : '12:00ごろに在庫追加予定'}
+            </strong>
           </div>
         </section>
 
