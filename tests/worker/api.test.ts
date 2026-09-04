@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../worker/app';
+import { getTokyoDate } from '../../worker/services/fulfillmentService';
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const context = createExecutionContext();
@@ -65,7 +66,7 @@ describe('Workers API with a real D1 binding', () => {
 
   it('exposes the time of todays restock without exposing stock counts', async () => {
     const eventId = 'stock_event_public_noon_restock_status';
-    const appliedAt = new Date().toISOString();
+    const appliedAt = `${getTokyoDate()}T03:34:56.000Z`;
     const cache = await caches.open('gakuyusai-public-status-v1');
     const cacheKey = new Request('https://worker.test/api/public/status');
     await cache.delete(cacheKey);

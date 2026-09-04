@@ -334,6 +334,7 @@ app.get('/api/public/status', async (c) => {
        WHERE event_type = 'restock'
          AND quantity_delta > 0
          AND date(datetime(created_at), '+9 hours') = ?
+         AND time(datetime(created_at), '+9 hours') >= '12:00:00'
        ORDER BY created_at DESC
        LIMIT 1`,
     ).bind(businessDate).first<{ created_at: string }>(),
