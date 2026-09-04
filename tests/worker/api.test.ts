@@ -2,7 +2,6 @@ import { env } from 'cloudflare:workers';
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../worker/app';
-import { getTokyoDate } from '../../worker/services/fulfillmentService';
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const context = createExecutionContext();
@@ -64,7 +63,7 @@ describe('Workers API with a real D1 binding', () => {
     expect(uncached).not.toBe(before);
   });
 
-  it('exposes the time of todays noon restock without exposing stock counts', async () => {
+  it('exposes the time of todays restock without exposing stock counts', async () => {
     const eventId = 'stock_event_public_noon_restock_status';
     const appliedAt = new Date().toISOString();
     const cache = await caches.open('gakuyusai-public-status-v1');
@@ -78,7 +77,7 @@ describe('Workers API with a real D1 binding', () => {
       eventId,
       'onigiri_shio',
       35,
-      `12時一括補充（${getTokyoDate()}）`,
+      '午後補充',
       appliedAt,
     ).run();
 

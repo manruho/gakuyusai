@@ -331,10 +331,12 @@ app.get('/api/public/status', async (c) => {
     c.env.DB.prepare(
       `SELECT created_at
        FROM stock_events
-       WHERE event_type = 'restock' AND reason = ?
+       WHERE event_type = 'restock'
+         AND quantity_delta > 0
+         AND date(datetime(created_at), '+9 hours') = ?
        ORDER BY created_at DESC
        LIMIT 1`,
-    ).bind(`12時一括補充（${businessDate}）`).first<{ created_at: string }>(),
+    ).bind(businessDate).first<{ created_at: string }>(),
   ]);
   const settings = settingsSnapshot.values;
   const isPublicEnabled = settings.public_status_enabled !== 'false';
