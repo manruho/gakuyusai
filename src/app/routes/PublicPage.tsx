@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatMonthDayTimeJst } from '../../lib/date';
 import { formatYen } from '../../lib/money';
 import type { PublicStatusItem, PublicStatusResponse } from '../../lib/types';
+import './PublicPage.css';
 
 const CATEGORIES = ['おにぎり', 'サイドメニュー', '飲み物'] as const;
 type PublicCategory = (typeof CATEGORIES)[number];
@@ -144,6 +145,22 @@ export function PublicPage() {
             <span>売り切れ {data.updatedAt ? soldOutCount : '—'}品</span>
           </div>
         </section>
+
+        <aside className="allergy-notice" aria-labelledby="allergy-notice-title">
+          <div className="allergy-notice-heading">
+            <span className="allergy-notice-icon" aria-hidden="true">!</span>
+            <h2 id="allergy-notice-title">アレルギーについて</h2>
+          </div>
+          <p>すべての商品を同じ製造工程・同じ調理器具で調理しているため、記載のないアレルギー物質が混入する可能性があります。</p>
+          <ul>
+            <li>海苔には小麦・大豆が含まれます。</li>
+            <li>ドリンク・豆腐のアレルギー情報は、商品本体の表示をご確認ください。</li>
+          </ul>
+          <p className="allergy-topping-note">
+            <strong>追加トッピング</strong>
+            マヨネーズ（卵・大豆）／わさびふりかけ（大豆・ごま）／チーズ（乳）
+          </p>
+        </aside>
 
         {error ? <p className="public-banner">{error}</p> : null}
         {!data.isPublicEnabled ? <p className="public-banner">公開ページは現在停止中です。</p> : null}

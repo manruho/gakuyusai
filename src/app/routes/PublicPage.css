@@ -1,0 +1,60 @@
+.allergy-notice {
+  margin: 0 0 16px;
+  padding: 15px 16px;
+  border: 2px solid rgba(180, 83, 9, 0.34);
+  border-radius: 20px;
+  background: rgba(255, 247, 223, 0.94);
+  box-shadow: 0 10px 24px rgba(80, 50, 20, 0.09);
+}
+
+.allergy-notice-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.allergy-notice-heading h2 {
+  margin: 0;
+  color: #7c2d12;
+  font-size: 17px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+}
+
+.allergy-notice-icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fffaf0;
+  background: #b45309;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.allergy-notice p,
+.allergy-notice ul {
+  margin: 0;
+  color: #62412c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.allergy-notice ul {
+  margin-top: 5px;
+  padding-left: 1.4em;
+}
+
+.allergy-notice .allergy-topping-note {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed rgba(180, 83, 9, 0.3);
+}
+
+.allergy-topping-note strong {
+  display: block;
+  color: #7c2d12;
+}
