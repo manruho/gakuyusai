@@ -47,14 +47,3 @@
   margin-top: 5px;
   padding-left: 1.4em;
 }
-
-.allergy-notice .allergy-topping-note {
-  margin-top: 9px;
-  padding-top: 9px;
-  border-top: 1px dashed rgba(180, 83, 9, 0.3);
-}
-
-.allergy-topping-note strong {
-  display: block;
-  color: #7c2d12;
-}

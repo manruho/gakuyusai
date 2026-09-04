@@ -33,7 +33,7 @@ describe('PublicPage allergy information', () => {
     expect(screen.getByRole('heading', { name: 'アレルギーについて' })).toBeVisible();
     expect(screen.getByText(/すべての商品を同じ製造工程・同じ調理器具で調理しているため/)).toBeVisible();
     expect(screen.getByText('海苔には小麦・大豆が含まれます。')).toBeVisible();
-    expect(screen.getByText(/マヨネーズ（卵・大豆）/)).toBeVisible();
+    expect(screen.queryByText('追加トッピング')).not.toBeInTheDocument();
     expect(await screen.findByText('アレルギー: 小麦・大豆・さば')).toBeVisible();
   });
 });

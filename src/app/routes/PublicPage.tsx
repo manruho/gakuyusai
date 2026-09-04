@@ -156,10 +156,6 @@ export function PublicPage() {
             <li>海苔には小麦・大豆が含まれます。</li>
             <li>ドリンク・豆腐のアレルギー情報は、商品本体の表示をご確認ください。</li>
           </ul>
-          <p className="allergy-topping-note">
-            <strong>追加トッピング</strong>
-            マヨネーズ（卵・大豆）／わさびふりかけ（大豆・ごま）／チーズ（乳）
-          </p>
         </aside>
 
         {error ? <p className="public-banner">{error}</p> : null}
