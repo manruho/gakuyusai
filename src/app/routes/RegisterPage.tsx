@@ -8,6 +8,8 @@ type Product = {
   category: string;
   price: number;
   currentStock: number;
+  presaleRemaining: number;
+  isPresaleLimitReached: boolean;
   statusLevel: number;
   isSoldOut: boolean;
   isActive: boolean;
@@ -31,6 +33,8 @@ type Receipt = {
   registerId: number;
   stationId: number;
 };
+
+type CheckoutDraft = { draftId: string; pickupCode: string; expiresAt: string; totalAmount: number };
 
 const CATEGORIES = ["おにぎり", "サイドメニュー", "飲み物"] as const;
 type ProductCategory = (typeof CATEGORIES)[number];
@@ -66,6 +70,13 @@ function formatPickupCode(code: string) {
   return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 }
 
+function getAvailableQuantity(item: Product, saleType: SaleType) {
+  return Math.min(
+    item.currentStock,
+    saleType === 'presale_pickup' ? item.presaleRemaining : item.currentStock,
+  );
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<Product[]>([]);
@@ -83,9 +94,11 @@ export function RegisterPage() {
   const [isCanceling, setIsCanceling] = useState(false);
   const [role, setRole] = useState<"staff" | "admin" | "owner" | null>(null);
   const [registerId, setRegisterId] = useState(1);
+  const [stationId, setStationId] = useState(1);
   const [registerReady, setRegisterReady] = useState(false);
   const [registerError, setRegisterError] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [checkoutDraft, setCheckoutDraft] = useState<CheckoutDraft | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const submittingRef = useRef(false);
   const loadRequestRef = useRef(0);
@@ -163,7 +176,10 @@ export function RegisterPage() {
         if (json && json.ok) setRole(json.data.role);
       });
     void fetch('/api/staff/register/current')
-      .then(async (response) => (await response.json()) as { ok: true; data: { registerId: number | null } } | { ok: false })
+      .then(async (response) => (await response.json()) as {
+        ok: true;
+        data: { registerId: number | null; stationId: number | null; saleType: SaleType | null };
+      } | { ok: false })
       .then((json) => {
         if (!json.ok) throw new Error('register lookup failed');
         if (!json.data.registerId) {
@@ -171,6 +187,8 @@ export function RegisterPage() {
           return;
         }
         setRegisterId(json.data.registerId);
+        setStationId(json.data.stationId ?? json.data.registerId);
+        setSaleType(json.data.saleType ?? (json.data.registerId === 4 ? 'presale_pickup' : 'normal'));
         setRegisterReady(true);
       })
       .catch(() => setRegisterError('レジ情報を確認できませんでした。画面を再読み込みしてください。'));
@@ -182,16 +200,23 @@ export function RegisterPage() {
   }, [phase]);
 
   useEffect(() => {
-    setSaleType(registerId === 4 ? "presale_pickup" : "normal");
-  }, [registerId]);
+    if (!checkoutDraft) return;
+    const cancelOnUnload = () => {
+      navigator.sendBeacon(`/api/staff/register/checkout-drafts/${encodeURIComponent(checkoutDraft.draftId)}/cancel`);
+    };
+    window.addEventListener('beforeunload', cancelOnUnload);
+    return () => window.removeEventListener('beforeunload', cancelOnUnload);
+  }, [checkoutDraft]);
 
   const add = (id: string) => {
     const item = items.find((entry) => entry.id === id);
+    const availableQuantity = item ? getAvailableQuantity(item, saleType) : 0;
     if (
       !item ||
       !item.isActive ||
       item.isSoldOut ||
-      (selected[id] ?? 0) >= item.currentStock
+      (saleType === 'presale_pickup' && item.isPresaleLimitReached) ||
+      (selected[id] ?? 0) >= availableQuantity
     )
       return;
     setSelected((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
@@ -241,11 +266,58 @@ export function RegisterPage() {
     submittingRef.current = false;
   };
 
-  const startPayment = () => {
+  const refreshRegisterMode = async () => {
+    const response = await fetch('/api/staff/register/current');
+    const json = (await response.json()) as {
+      ok: true;
+      data: { registerId: number | null; stationId: number | null; saleType: SaleType | null };
+    } | { ok: false; error?: { message?: string } };
+    if (!json.ok || !json.data.registerId || !json.data.saleType) {
+      throw new Error(json.ok ? 'レジ情報を確認できませんでした。' : json.error?.message ?? 'レジ情報を確認できませんでした。');
+    }
+    if (json.data.registerId !== registerId) {
+      throw new Error('レジ設定が変更されています。レジを選び直してください。');
+    }
+    setStationId(json.data.stationId ?? json.data.registerId);
+    setSaleType(json.data.saleType);
+    return json.data.saleType;
+  };
+
+  const startPayment = async () => {
+    try {
+      await refreshRegisterMode();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'レジ設定を確認できませんでした。');
+      return;
+    }
     setPaidAmount(0);
     setCheckoutError("");
     resetCheckoutKey();
+    if (saleType === 'normal') {
+      const idempotencyKey = crypto.randomUUID();
+      idempotencyKeyRef.current = idempotencyKey;
+      try {
+        const response = await fetch('/api/staff/register/checkout-drafts', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idempotencyKey, saleType: 'normal', items: selectedEntries.map(({ item, quantity }) => ({ productId: item.id, quantity })) }),
+        });
+        const json = await readApiResponse<{ ok: true; data: CheckoutDraft } | { ok: false; error: { message: string } }>(response);
+        if (!json.ok) throw new Error(json.error.message);
+        setCheckoutDraft(json.data);
+      } catch (error) {
+        resetCheckoutKey();
+        setMessage(error instanceof Error ? error.message : '注文番号を発行できませんでした。');
+        return;
+      }
+    }
     setPhase("pay");
+  };
+
+  const cancelActiveDraft = async () => {
+    if (!checkoutDraft) return;
+    const draft = checkoutDraft;
+    setCheckoutDraft(null);
+    await fetch(`/api/staff/register/checkout-drafts/${encodeURIComponent(draft.draftId)}/cancel`, { method: 'POST' }).catch(() => undefined);
   };
 
   const appendPaidDigit = (digit: number) => {
@@ -271,10 +343,12 @@ export function RegisterPage() {
     }));
 
     try {
-      const response = await fetch("/api/staff/register/checkout", {
+      const response = await fetch(checkoutDraft
+        ? `/api/staff/register/checkout-drafts/${encodeURIComponent(checkoutDraft.draftId)}/complete`
+        : "/api/staff/register/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(checkoutDraft ? { paymentMethod: 'cash', paidAmount } : {
           idempotencyKey,
           saleType,
           paymentMethod: "cash",
@@ -298,9 +372,22 @@ export function RegisterPage() {
               stationId: number;
             };
           }
-        | { ok: false; error: { message: string } }
+        | { ok: false; error: { code?: string; message: string } }
       >(response);
-      if (!json.ok) throw new Error(json.error.message);
+      if (!json.ok) {
+        if (json.error.code === 'REGISTER_MODE_MISMATCH') {
+          try {
+            await refreshRegisterMode();
+          } catch {
+            // Keep the original checkout error if the refresh also fails.
+          }
+          setPaidAmount(0);
+          setPhase('select');
+          setCheckoutError('レジの販売設定が変更されました。内容を確認して、もう一度会計へ進んでください。');
+          return;
+        }
+        throw new Error(json.error.message);
+      }
       setReceipt({
         saleId: json.data.saleId,
         items: selectedItems,
@@ -312,6 +399,7 @@ export function RegisterPage() {
         stationId: json.data.stationId,
       });
       setPhase("complete");
+      setCheckoutDraft(null);
       clear();
       void load();
     } catch (error) {
@@ -327,8 +415,9 @@ export function RegisterPage() {
   const nextCheckout = () => {
     clear();
     setPaidAmount(0);
-    setSaleType(registerId === 4 ? "presale_pickup" : "normal");
+    void refreshRegisterMode().catch(() => undefined);
     setReceipt(null);
+    setCheckoutDraft(null);
     setCheckoutError("");
     resetCheckoutKey();
     setPhase("select");
@@ -386,24 +475,8 @@ export function RegisterPage() {
               {saleType === "normal" ? "通常販売" : "事前販売"}
             </span>
           </div>
-          <span className="register-station-label">受取{registerId} / 色紙 {['赤', '青', '緑', '水色'][registerId - 1]}</span>
-          {registerId === 4 ? (
-            <span className="register-special-mode">前売り専用</span>
-          ) : (
-            <div
-              className="register-mode-switch"
-              aria-label="販売モードを切り替える"
-            >
-              <button
-                type="button"
-                onClick={() => setSaleType("normal")}
-                aria-pressed={saleType === "normal"}
-                disabled={phase !== "select"}
-              >
-                通常
-              </button>
-            </div>
-          )}
+          <span className="register-station-label">受取{stationId} / 色紙 {stationId === 4 ? '白' : ['赤', '青', '緑'][stationId - 1]}</span>
+          {saleType === "presale_pickup" ? <span className="register-special-mode">前売り専用</span> : null}
           {role === "admin" || role === "owner" ? (
             <a href="/admin">管理画面へ</a>
           ) : null}
@@ -442,7 +515,9 @@ export function RegisterPage() {
               <div className="product-list">
                 {visibleItems.map((item) => {
                   const quantity = selected[item.id] ?? 0;
-                  const disabled = !item.isActive || item.isSoldOut;
+                  const presaleLimitReached = saleType === 'presale_pickup' && item.isPresaleLimitReached;
+                  const availableQuantity = getAvailableQuantity(item, saleType);
+                  const disabled = !item.isActive || item.isSoldOut || presaleLimitReached;
                   const productCategory = normalizeCategory(item);
                   const categoryClass =
                     productCategory === "おにぎり"
@@ -454,6 +529,8 @@ export function RegisterPage() {
                     ? "停止中"
                     : item.isSoldOut
                       ? "売り切れ"
+                      : presaleLimitReached
+                        ? "前売り終了"
                       : item.statusLevel <= 0
                         ? "残り少なめ"
                         : "";
@@ -465,7 +542,7 @@ export function RegisterPage() {
                       <button
                         type="button"
                         className="product-main-button"
-                        disabled={disabled || quantity >= item.currentStock}
+                        disabled={disabled || quantity >= availableQuantity}
                         onClick={() => add(item.id)}
                         aria-label={`${item.displayName} を 1 個追加する`}
                       >
@@ -479,7 +556,7 @@ export function RegisterPage() {
                           <span className="product-count">{quantity} 点</span>
                           {badge ? (
                             <span
-                              className={`stock-badge ${!item.isActive ? "is-stopped" : item.isSoldOut ? "is-soldout" : "is-low"}`}
+                              className={`stock-badge ${!item.isActive ? "is-stopped" : item.isSoldOut || presaleLimitReached ? "is-soldout" : "is-low"}`}
                             >
                               {badge}
                             </span>
@@ -491,7 +568,7 @@ export function RegisterPage() {
                           type="button"
                           className="product-mini-button"
                           onClick={() => add(item.id)}
-                          disabled={disabled || quantity >= item.currentStock}
+                          disabled={disabled || quantity >= availableQuantity}
                           aria-label={`${item.displayName} を 1 個追加する`}
                         >
                           ＋
@@ -570,7 +647,7 @@ export function RegisterPage() {
                             type="button"
                             className="cart-step-button"
                             onClick={() => add(item.id)}
-                            disabled={quantity >= item.currentStock}
+                            disabled={quantity >= getAvailableQuantity(item, saleType)}
                             aria-label={`${item.displayName} を 1 個追加する`}
                           >
                             ＋
@@ -595,7 +672,7 @@ export function RegisterPage() {
                 <button
                   type="button"
                   className="primary-action"
-                  onClick={startPayment}
+                  onClick={() => void startPayment()}
                   disabled={!selectedCount || total <= 0}
                 >
                   {saleType === "normal" ? "会計へ進む" : "前売り会計へ"}
@@ -627,6 +704,7 @@ export function RegisterPage() {
                   <strong>{formatYen(total)}</strong>
                   <small>{selectedCount}点</small>
                 </div>
+                {checkoutDraft ? <div className="checkout-draft-code"><span>会計待ち注文番号</span><strong>{formatPickupCode(checkoutDraft.pickupCode)}</strong><small>3分以内に会計を確定してください</small></div> : null}
                 {saleType === "normal" ? (
                   <>
                     <div className="checkout-paid">
@@ -758,6 +836,7 @@ export function RegisterPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    void cancelActiveDraft();
                     setCheckoutError("");
                     resetCheckoutKey();
                     setPhase("select");

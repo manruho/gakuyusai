@@ -22,6 +22,9 @@ export const editableSettingsSchema = z.object({
   pickup_2_username: z.string().trim().min(1).max(100).optional(),
   pickup_3_username: z.string().trim().min(1).max(100).optional(),
   pickup_4_username: z.string().trim().min(1).max(100).optional(),
+  register_1_presale_enabled: booleanSetting.optional(),
+  register_2_presale_enabled: booleanSetting.optional(),
+  register_3_presale_enabled: booleanSetting.optional(),
 }).strict();
 
 export type EditableSettings = z.infer<typeof editableSettingsSchema>;
@@ -29,6 +32,38 @@ export type EditableSettings = z.infer<typeof editableSettingsSchema>;
 export const EDITABLE_SETTING_NAMES = Object.freeze(Object.keys(editableSettingsSchema.shape));
 const EDITABLE_SETTING_KEYS = new Set(EDITABLE_SETTING_NAMES);
 const DEFAULT_THRESHOLDS = { low: 0.15, mid: 0.35, high: 0.65 } as const;
+
+export type RegisterId = 1 | 2 | 3 | 4;
+export type RegisterSaleType = 'normal' | 'presale_pickup';
+
+export function getRegisterSaleType(
+  settings: Record<string, string>,
+  registerId: RegisterId,
+): RegisterSaleType {
+  if (registerId === 4) return 'presale_pickup';
+  return settings[`register_${registerId}_presale_enabled`] === 'true'
+    ? 'presale_pickup'
+    : 'normal';
+}
+
+export function getRegisterStationId(
+  settings: Record<string, string>,
+  registerId: RegisterId,
+): RegisterId {
+  return getRegisterSaleType(settings, registerId) === 'presale_pickup' ? 4 : registerId;
+}
+
+export function getRegisterConfiguration(settings: Record<string, string>) {
+  return ([1, 2, 3, 4] as const).map((registerId) => {
+    const saleType = getRegisterSaleType(settings, registerId);
+    return {
+      registerId,
+      saleType,
+      stationId: getRegisterStationId(settings, registerId),
+      configurable: registerId !== 4,
+    };
+  });
+}
 
 export function sanitizeSettings(settings: Record<string, string>): EditableSettings {
   return Object.fromEntries(

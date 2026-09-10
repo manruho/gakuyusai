@@ -31,6 +31,8 @@ export function getTokyoDate(now = new Date()): string {
 }
 
 export function isPickupAvailable(pickupDate: string, now = new Date()): boolean {
+  // pickup_date is the first date on which the order may be handed over.
+  // Presale tickets intentionally have no upper expiry date.
   return pickupDate <= getTokyoDate(now);
 }
 

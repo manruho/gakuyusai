@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 export type RealtimeEvent = {
   eventId: string;
-  type: 'order.created' | 'order.delivered' | 'order.restored' | 'order.canceled' | 'order.cancel_acknowledged';
+  type: 'order.created' | 'order.awaiting_payment' | 'order.payment_completed' | 'order.expired' | 'order.delivered' | 'order.restored' | 'order.canceled' | 'order.cancel_acknowledged';
   stationId: 1 | 2 | 3 | 4;
   occurredAt: string;
   data: Record<string, unknown>;

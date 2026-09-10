@@ -77,5 +77,7 @@ describe('AdminPage permissions', () => {
     expect(screen.getByRole('heading', { name: 'システム設定' })).toBeInTheDocument();
     expect(screen.queryByText(/password hash/i)).not.toBeInTheDocument();
     expect(screen.getByText(/パスワードハッシュはブラウザへ返さず/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'レジ1を前売り券専用にする' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'レジ4は前売り券専用（固定）' })).toBeChecked();
   });
 });

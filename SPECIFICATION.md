@@ -121,7 +121,7 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - 通常販売と事前販売を切り替える
 - 通常販売は現金のみ。預かり金額が合計以上である必要がある
 - 事前販売は1日目に現金を受け取る。支払方法は `cash` とし、合計以上の預かり金額が必要
-- レジ1〜3は通常販売専用、レジ4は前売り販売専用。APIでも販売種別とレジ番号を検証する
+- レジ1〜3は設定画面でそれぞれ通常販売／前売り販売専用を切り替えられる。レジ4は常に前売り販売専用とし、APIでも設定と販売種別を検証する
 - 預かり金額から釣銭を計算する
 - 確定時にレシート情報と販売 ID を表示する
 - 二重送信を防ぐため、会計単位で UUID の冪等キーを生成する
@@ -130,12 +130,14 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 
 #### 商品の受取 `/pickup`
 
-- 受取1〜3は対応するレジの通常注文、受取4は前売り注文を一覧表示する
+- 通常注文は販売レジと同じ番号の受取へ送信し、前売り注文は販売レジ番号にかかわらず受取4へ送信する。受取1〜3は通常注文、受取4は前売り注文を一覧表示する
 - 受取1〜3は当日が受取対象の注文だけを一覧表示し、受取4は予約確認のため本日以降が受取対象の前売り注文を一覧表示する
 - 受取4の翌日以降の予約には受取日を表示し、受取済み操作は日本時間の受取日以降だけ許可する（APIでも検証する）
 - 4文字の通常注文番号または6文字の前売りID、商品名で一覧を検索できる
 - 注文内容を確認してから受取済みに更新する
 - 受取済みIDは再度受け取れず、前売り注文はキャンセルできない
+- 通常販売は商品確定時に会計待ちIDを薄い紺色で先行表示し、受取操作を禁止する。会計済みは同じIDを黒色へ変更する
+- 未会計の取消・3分の期限切れは赤字かつ取消線で表示し、受取担当者が確認するまで残す
 - 前売りIDと販売・受取イベントは削除せず保持する
 
 ### 3.4 在庫 `/staff/stock`
@@ -167,6 +169,7 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - 公開状態の ON/OFF
 - 販売状態の ON 操作
 - 店舗名、ログイン名、在庫しきい値などの設定保存
+- `/admin/inventory` から本日の12時入荷分（おにぎり16種465個、唐揚げ200個）を手動で一括補充。同じ営業日は一度だけ実行可能
 - パスワードハッシュはブラウザへ返さず、Cloudflare Secrets で管理
 - 在庫 CSV、売上 CSV、在庫イベント CSV の取得・ダウンロード
 
@@ -215,10 +218,16 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 | POST | `/api/auth/logout` | 不要 | セッション破棄 |
 | GET | `/api/staff/register/products` | staff/admin/owner | レジ商品一覧 |
 | GET | `/api/register/products` | staff/admin/owner | 上記の互換エイリアス |
+| GET | `/api/staff/register/config` | staff/admin/owner | レジごとの販売種別・受取先設定 |
 | POST | `/api/staff/register/checkout` | staff/admin/owner | 会計 |
+| POST | `/api/staff/register/checkout-drafts` | staff/admin/owner | 通常販売の商品確定、注文番号発行、3分間の在庫仮押さえ |
+| POST | `/api/staff/register/checkout-drafts/:draftId/complete` | staff/admin/owner | 会計待ち注文の支払確定 |
+| POST | `/api/staff/register/checkout-drafts/:draftId/cancel` | staff/admin/owner | 会計待ち注文の取消 |
 | POST | `/api/sales` | staff/admin/owner | 会計の互換エイリアス |
 | GET | `/api/staff/stock` | admin/owner | 在庫一覧 |
 | GET | `/api/stock` | admin/owner | 在庫一覧の互換エイリアス |
+| GET | `/api/staff/stock/noon-restock` | admin/owner | 本日の12時一括補充内容・実施状態 |
+| POST | `/api/staff/stock/noon-restock` | admin/owner | 本日の12時入荷分を手動で一括補充 |
 | POST | `/api/staff/stock/event` | admin/owner | 補充・廃棄・補正 |
 | POST | `/api/stock/events` | admin/owner | 在庫イベントの互換エイリアス |
 | GET | `/api/staff/stock/history` | admin/owner | 在庫履歴。`limit` 1～100、`q` 対応 |
@@ -335,7 +344,13 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 
 販売に紐づくイベントは `related_sale_id` を持ち、手動イベントは `reason` を持ちます。
 
-### 6.6 `settings`
+12時一括補充では対象17商品それぞれに `restock` イベントを作成し、理由へ営業日を記録します。
+
+### 6.6 `stock_restock_batches`
+
+12時一括補充の実施記録です。`batch_key` と `business_date` の組を UNIQUE とし、同じ営業日の二重補充を防ぎます。在庫更新、在庫イベント17件、実施記録はD1 batchで一括確定します。
+
+### 6.7 `settings`
 
 キー・バリュー形式の運用設定です。主なキーは次のとおりです。
 
@@ -349,10 +364,11 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 - `admin_username`
 - `owner_username`
 - `pickup_1_username` 〜 `pickup_4_username`
+- `register_1_presale_enabled` 〜 `register_3_presale_enabled`（`true` / `false`。レジ4は常に前売り専用）
 
 パスワードハッシュは Cloudflare Secrets で管理し、このテーブルの編集対象には含めません。
 
-### 6.7 `login_attempts`
+### 6.8 `login_attempts`
 
 ログイン試行制限用です。
 
@@ -370,6 +386,9 @@ wrangler.jsonc           Cloudflare Pages / D1 設定（正）
 | `0003_login_attempts.sql` | ログイン試行制限テーブル追加 |
 | `0004_public_menu_refresh.sql` | 商品カテゴリ追加、公開用メニューを投入 |
 | `0005_allow_staff_sale_records.sql` | 販売・在庫イベントの作成者に `staff` を許可 |
+| `0015_allow_register_station_routing.sql` | 販売レジと受取場所を分離し、前売り注文を受取4へ集約 |
+| `0016_noon_restock_batches.sql` | 12時一括補充の営業日単位の二重実行防止 |
+| `0018_checkout_drafts.sql` | 会計前注文、商品スナップショット、3分間の在庫予約 |
 
 `0002_seed_example.sql` は既存テーブルを削除せず、例示データを `INSERT OR IGNORE` で投入します。すでに旧版の `0002` を適用した環境では、ファイルを変更しても適用済みのSQLは再実行されないため、migration履歴を確認してください。
 

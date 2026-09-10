@@ -10,6 +10,8 @@ type Order = {
   created_at: string;
   delivered_at: string | null;
   cancel_acknowledged_at: string | null;
+  paymentStatus: 'awaiting_payment' | 'paid' | 'canceled';
+  cancelReason: string;
   items: Array<{ product_id: string; product_name: string; quantity: number }>;
 };
 
@@ -193,7 +195,7 @@ export function PickupPage() {
         <header className="pickup-header pickup-compact-header"><strong className="pickup-station-title">受取{stationId ?? '－'}</strong><span className="pickup-count">未処理 {pending.length}件</span><div className="pickup-connection">● {syncState}<button type="button" onClick={() => void load()}>再同期</button></div></header>
         {message ? <p className="error">{message}</p> : null}
         <p className="pickup-presale-note">
-          {stationId === 4 ? '前売り券（予約済み・本日以降の受取分）一覧' : '当日注文（本日受取分）一覧'}
+          {stationId === 4 ? '前売り券（予約済み・未受取分）一覧' : '当日注文（本日受取分）一覧'}
         </p>
         <label className="pickup-search">
           <span>{stationId === 4 ? '前売りID・商品名で検索' : '当日注文番号・商品名で検索'}</span>
@@ -223,16 +225,16 @@ export function PickupPage() {
           {pending.map((order) => {
             const isUpcoming = order.pickup_date > getTokyoDate();
             return (
-            <article className={`pickup-table-row${newOrderIds.has(order.id) ? ' is-new-order' : ''}${isUpcoming ? ' is-upcoming' : ''}`} key={order.id}>
+            <article className={`pickup-table-row${newOrderIds.has(order.id) ? ' is-new-order' : ''}${isUpcoming ? ' is-upcoming' : ''}${order.paymentStatus === 'awaiting_payment' ? ' is-awaiting-payment' : ''}`} key={order.id}>
               <div><strong className="pickup-row-code">{formatPickupCode(order.pickup_code)}</strong>{stationId === 4 ? <span className="pickup-date-label">{formatPickupDate(order.pickup_date)}</span> : null}</div>
               <div className="pickup-row-items">{order.items.map((item) => <span key={item.product_id}><span>{item.product_name}</span><strong>×{item.quantity}</strong></span>)}</div>
-              <button type="button" className="pickup-check-button" onClick={() => setPendingOrder(order)} disabled={isUpcoming} aria-label={isUpcoming ? `${formatPickupCode(order.pickup_code)}は${formatPickupDate(order.pickup_date)}` : `${formatPickupCode(order.pickup_code)}を受取済みにする`}>{isUpcoming ? '予約済' : '受取'}</button>
+              <button type="button" className="pickup-check-button" onClick={() => setPendingOrder(order)} disabled={isUpcoming || order.paymentStatus === 'awaiting_payment'} aria-label={order.paymentStatus === 'awaiting_payment' ? `${formatPickupCode(order.pickup_code)}は会計待ちです` : isUpcoming ? `${formatPickupCode(order.pickup_code)}は${formatPickupDate(order.pickup_date)}` : `${formatPickupCode(order.pickup_code)}を受取済みにする`}>{order.paymentStatus === 'awaiting_payment' ? '会計待ち' : isUpcoming ? '予約済' : '受取'}</button>
             </article>
             );
           })}
           {!pending.length ? <p className="empty-state pickup-empty">未受渡しの注文はありません。</p> : null}
         </section>
-        {canceled.length ? <section className="pickup-canceled"><h2>キャンセル確認</h2>{canceled.map((order) => <article className="pickup-cancel-row" key={order.id}><strong>{formatPickupCode(order.pickup_code)}</strong><span>レジ側で取り消されました。</span><button type="button" onClick={() => void action(order, 'ack-cancel')}>確認</button></article>)}</section> : null}
+        {canceled.length ? <section className="pickup-canceled"><h2>キャンセル確認</h2>{canceled.map((order) => <article className="pickup-cancel-row" key={order.id}><strong>{formatPickupCode(order.pickup_code)}</strong><span>{order.cancelReason || 'レジ側で取り消されました。'}</span><button type="button" onClick={() => void action(order, 'ack-cancel')}>確認</button></article>)}</section> : null}
         {delivered.length ? <section className="pickup-delivered"><h2>直近の受渡済み</h2>{delivered.map((order) => <div className="pickup-delivered-row" key={order.id}><strong className="order-code">{formatPickupCode(order.pickup_code)}</strong><span>{order.items.map((item) => `${item.product_name} ×${item.quantity}`).join('、')}</span><button type="button" onClick={() => void action(order, 'restore')}>戻す</button></div>)}</section> : null}
       </section>
       {pendingOrder ? (

@@ -164,7 +164,7 @@ P9AX
 使用候補文字:
 
 ```text
-23479ACDEFHJKMNPQRTUVWXYZ
+3479ACDEFHJKMNPQRTUVWXY
 ```
 
 除外する主な文字:
@@ -174,6 +174,7 @@ P9AX
 1 I L
 5 S
 8 B
+2 Z
 ```
 
 ### 4.3 発行方法

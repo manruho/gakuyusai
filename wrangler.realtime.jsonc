@@ -15,6 +15,16 @@
       "head_sampling_rate": 0.01
     }
   },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gakuyusai",
+      "database_id": "1f791e5e-c06f-46a1-9838-02ce7ceb53bc"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

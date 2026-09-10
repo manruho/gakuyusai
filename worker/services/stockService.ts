@@ -18,6 +18,55 @@ export const stockEventSchema = z.object({
 
 export type StockEventInput = z.infer<typeof stockEventSchema>;
 
+export const NOON_RESTOCK_CONFIRMATION = 'APPLY_NOON_RESTOCK' as const;
+export const NOON_RESTOCK_BATCH_KEY = 'official-noon-restock-v1';
+export const NOON_RESTOCK_ITEMS = [
+  { productId: 'onigiri_shio', displayName: '塩', quantity: 35 },
+  { productId: 'onigiri_ume_official', displayName: '梅', quantity: 30 },
+  { productId: 'onigiri_shiso_kombu', displayName: 'しそ昆布', quantity: 20 },
+  { productId: 'onigiri_okaka_official', displayName: 'おかか', quantity: 30 },
+  { productId: 'onigiri_tuna_mayo_official', displayName: 'ツナマヨ', quantity: 50 },
+  { productId: 'onigiri_takana_chirimen', displayName: '高菜ちりめん', quantity: 10 },
+  { productId: 'onigiri_tori_soboro', displayName: 'とりそぼろ', quantity: 15 },
+  { productId: 'onigiri_teriyaki_chicken', displayName: '照り焼きチキン', quantity: 25 },
+  { productId: 'onigiri_ebi_mayo', displayName: 'エビマヨ', quantity: 30 },
+  { productId: 'onigiri_chanja', displayName: 'チャンじゃ', quantity: 30 },
+  { productId: 'onigiri_yaki_tarako', displayName: '焼きたらこ', quantity: 40 },
+  { productId: 'onigiri_kinira_nikumiso', displayName: '黄ニラ肉みそ', quantity: 35 },
+  { productId: 'onigiri_karashi_mentaiko', displayName: '辛子明太', quantity: 50 },
+  { productId: 'onigiri_sake_official', displayName: '鮭', quantity: 30 },
+  { productId: 'onigiri_ebi_tenmusu', displayName: 'エビ天むす', quantity: 25 },
+  { productId: 'onigiri_nibuta_chashu', displayName: '煮豚チャーシュー', quantity: 10 },
+  { productId: 'side_karaage_official', displayName: '唐揚げ', quantity: 200 },
+] as const;
+
+export const NOON_RESTOCK_TOTAL_QUANTITY = NOON_RESTOCK_ITEMS.reduce(
+  (total, item) => total + item.quantity,
+  0,
+);
+
+type StockRestockBatchRow = {
+  id: string;
+  business_date: string;
+  item_count: number;
+  total_quantity: number;
+  applied_by_role: 'admin' | 'owner';
+  applied_by_username: string;
+  applied_at: string;
+};
+
+export type NoonRestockStatus = {
+  businessDate: string;
+  applied: boolean;
+  alreadyApplied: boolean;
+  itemCount: number;
+  totalQuantity: number;
+  appliedAt: string | null;
+  appliedByRole: 'admin' | 'owner' | null;
+  appliedByUsername: string | null;
+  items: Array<{ productId: string; displayName: string; quantity: number }>;
+};
+
 type ProductRow = {
   id: string;
   display_name: string;
@@ -126,6 +175,117 @@ export async function recordStockEvent(
     ).bind(createId('stock_event'), input.productId, input.eventType, input.quantityDelta, input.reason ?? '', role, now),
   ]);
   return { updatedAt: now };
+}
+
+async function findNoonRestockBatch(
+  db: D1Database,
+  businessDate: string,
+): Promise<StockRestockBatchRow | null> {
+  return db.prepare(
+    `SELECT id, business_date, item_count, total_quantity,
+            applied_by_role, applied_by_username, applied_at
+     FROM stock_restock_batches
+     WHERE batch_key = ? AND business_date = ?`,
+  ).bind(NOON_RESTOCK_BATCH_KEY, businessDate).first<StockRestockBatchRow>();
+}
+
+function toNoonRestockStatus(
+  businessDate: string,
+  batch: StockRestockBatchRow | null,
+  alreadyApplied: boolean,
+): NoonRestockStatus {
+  return {
+    businessDate,
+    applied: batch !== null,
+    alreadyApplied,
+    itemCount: batch?.item_count ?? NOON_RESTOCK_ITEMS.length,
+    totalQuantity: batch?.total_quantity ?? NOON_RESTOCK_TOTAL_QUANTITY,
+    appliedAt: batch?.applied_at ?? null,
+    appliedByRole: batch?.applied_by_role ?? null,
+    appliedByUsername: batch?.applied_by_username ?? null,
+    items: NOON_RESTOCK_ITEMS.map((item) => ({ ...item })),
+  };
+}
+
+export async function getNoonRestockStatus(
+  db: D1Database,
+  businessDate: string,
+): Promise<NoonRestockStatus> {
+  return toNoonRestockStatus(businessDate, await findNoonRestockBatch(db, businessDate), false);
+}
+
+export async function applyNoonRestock(
+  db: D1Database,
+  role: 'admin' | 'owner',
+  username: string,
+  businessDate: string,
+): Promise<NoonRestockStatus | { error: 'PRODUCTS_NOT_AVAILABLE'; missingProductIds: string[] }> {
+  const existing = await findNoonRestockBatch(db, businessDate);
+  if (existing) return toNoonRestockStatus(businessDate, existing, true);
+
+  const productIds = NOON_RESTOCK_ITEMS.map((item) => item.productId);
+  const placeholders = productIds.map(() => '?').join(',');
+  const products = await db.prepare(
+    `SELECT i.product_id
+     FROM product_inventory i
+     JOIN products p ON p.id = i.product_id
+     WHERE i.product_id IN (${placeholders})
+       AND p.is_active = 1
+       AND p.deleted_at IS NULL`,
+  ).bind(...productIds).all<{ product_id: string }>();
+  const availableProductIds = new Set((products.results ?? []).map((row) => row.product_id));
+  const missingProductIds = productIds.filter((productId) => !availableProductIds.has(productId));
+  if (missingProductIds.length) return { error: 'PRODUCTS_NOT_AVAILABLE', missingProductIds };
+
+  const now = new Date().toISOString();
+  try {
+    await db.batch([
+      db.prepare(
+        `INSERT INTO stock_restock_batches (
+           id, batch_key, business_date, item_count, total_quantity,
+           applied_by_role, applied_by_username, applied_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        createId('stock_restock_batch'),
+        NOON_RESTOCK_BATCH_KEY,
+        businessDate,
+        NOON_RESTOCK_ITEMS.length,
+        NOON_RESTOCK_TOTAL_QUANTITY,
+        role,
+        username,
+        now,
+      ),
+      ...NOON_RESTOCK_ITEMS.flatMap((item) => [
+        db.prepare(
+          `UPDATE product_inventory
+           SET current_stock = current_stock + ?, updated_at = ?
+           WHERE product_id = ?`,
+        ).bind(item.quantity, now, item.productId),
+        db.prepare(
+          `INSERT INTO stock_events (
+             id, product_id, event_type, quantity_delta, reason, created_by_role, created_at
+           ) VALUES (?, ?, 'restock', ?, ?, ?, ?)`,
+        ).bind(
+          createId('stock_event'),
+          item.productId,
+          item.quantity,
+          `12時一括補充（${businessDate}）`,
+          role,
+          now,
+        ),
+      ]),
+    ]);
+  } catch (error) {
+    if (error instanceof Error && /UNIQUE constraint failed:.*stock_restock_batches/i.test(error.message)) {
+      const concurrentBatch = await findNoonRestockBatch(db, businessDate);
+      if (concurrentBatch) return toNoonRestockStatus(businessDate, concurrentBatch, true);
+    }
+    throw error;
+  }
+
+  const applied = await findNoonRestockBatch(db, businessDate);
+  if (!applied) throw new Error('NOON_RESTOCK_NOT_RECORDED');
+  return toNoonRestockStatus(businessDate, applied, false);
 }
 
 export async function cancelSale(

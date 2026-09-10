@@ -14,6 +14,8 @@ const productResponse = {
         category: "おにぎり",
         price: 750,
         currentStock: 10,
+        presaleRemaining: 3,
+        isPresaleLimitReached: false,
         statusLevel: 3,
         isSoldOut: false,
         isActive: true,
@@ -24,23 +26,31 @@ const productResponse = {
 
 describe("RegisterPage", () => {
   let currentRegisterId = 1;
+  let currentSaleType: "normal" | "presale_pickup" = "normal";
 
   const renderRegister = () => render(<MemoryRouter><RegisterPage /></MemoryRouter>);
 
   beforeEach(() => {
     currentRegisterId = 1;
+    currentSaleType = "normal";
+    productResponse.data.items[0].presaleRemaining = 3;
+    productResponse.data.items[0].isPresaleLimitReached = false;
     vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.includes('/api/staff/register/checkout-drafts')) {
+          return new Response(JSON.stringify({ ok: true, data: { draftId: 'draft-1', pickupCode: '7KQ2', expiresAt: new Date(Date.now() + 180_000).toISOString(), totalAmount: 750 } }));
+        }
         if (url.includes("/api/auth/me")) {
           return new Response(
             JSON.stringify({ ok: true, data: { role: "staff" } }),
           );
         }
         if (url.includes("/api/staff/register/current")) {
-          return new Response(JSON.stringify({ ok: true, data: { registerId: currentRegisterId } }));
+          const saleType = currentRegisterId === 4 ? "presale_pickup" : currentSaleType;
+          return new Response(JSON.stringify({ ok: true, data: { registerId: currentRegisterId, stationId: saleType === "presale_pickup" ? 4 : currentRegisterId, saleType } }));
         }
         return new Response(JSON.stringify(productResponse));
       }),
@@ -64,6 +74,7 @@ describe("RegisterPage", () => {
     await user.click(screen.getByRole("button", { name: "会計へ進む" }));
 
     expect(screen.getByText("今回の注文内容（1点）")).toBeVisible();
+    expect(screen.getByText('7KQ2')).toBeVisible();
 
     expect(screen.getByText("あと￥750")).toBeVisible();
     expect(screen.queryByText("不足")).not.toBeInTheDocument();
@@ -88,6 +99,28 @@ describe("RegisterPage", () => {
     expect(screen.getByText("前日に現金を受け取ります")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "ちょうど" }));
     expect(screen.getByRole("button", { name: "前売り券を発行" })).toBeEnabled();
+  });
+
+  it("設定で前売り化したレジ1は受取4へ案内する", async () => {
+    const user = userEvent.setup();
+    currentSaleType = "presale_pickup";
+    renderRegister();
+
+    expect(await screen.findByText("前売り専用")).toBeVisible();
+    expect(screen.getByText("受取4 / 色紙 白")).toBeVisible();
+    await user.click(screen.getAllByRole("button", { name: "鮭おにぎり を 1 個追加する" })[0]);
+    await user.click(screen.getByRole("button", { name: "前売り会計へ" }));
+    expect(screen.getByRole("heading", { name: "前売り会計" })).toBeVisible();
+  });
+
+  it("前売り上限に達した商品は前売り終了として選択できない", async () => {
+    currentRegisterId = 4;
+    productResponse.data.items[0].presaleRemaining = 0;
+    productResponse.data.items[0].isPresaleLimitReached = true;
+    renderRegister();
+
+    expect(await screen.findByText("前売り終了")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "鮭おにぎり を 1 個追加する" })[0]).toBeDisabled();
   });
 
   it("カートの削除は確認後にすべての個数を削除する", async () => {

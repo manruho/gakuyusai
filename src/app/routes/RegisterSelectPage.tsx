@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const stations = [
@@ -8,10 +9,27 @@ const stations = [
   { id: 4, color: '白' },
 ] as const;
 
+type RegisterConfiguration = {
+  registerId: 1 | 2 | 3 | 4;
+  stationId: 1 | 2 | 3 | 4;
+  saleType: 'normal' | 'presale_pickup';
+  configurable: boolean;
+};
+
 export function RegisterSelectPage() {
   const navigate = useNavigate();
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [configurations, setConfigurations] = useState<RegisterConfiguration[]>([]);
+
+  useEffect(() => {
+    void fetch('/api/staff/register/config')
+      .then(async (response) => (await response.json()) as { ok: true; data: { registers: RegisterConfiguration[] } } | { ok: false })
+      .then((json) => {
+        if (json.ok) setConfigurations(json.data.registers);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const select = async (registerId: number) => {
     setBusy(true);
@@ -46,11 +64,18 @@ export function RegisterSelectPage() {
         <p className="small">レジ番号と色紙の色を確認して選択してください。</p>
         <div className="register-choice-grid">
           {stations.map((station) => (
-            <button key={station.id} type="button" onClick={() => void select(station.id)} disabled={busy}>
-              <strong>レジ{station.id}</strong>
-              <span>受取{station.id}</span>
-              <small>色紙：{station.color}</small>
-            </button>
+            (() => {
+              const configuration = configurations.find((item) => item.registerId === station.id);
+              const saleType = configuration?.saleType ?? (station.id === 4 ? 'presale_pickup' : 'normal');
+              const stationId = configuration?.stationId ?? (station.id === 4 ? 4 : station.id);
+              return (
+                <button key={station.id} type="button" onClick={() => void select(station.id)} disabled={busy}>
+                  <strong>レジ{station.id}</strong>
+                  <span>{saleType === 'presale_pickup' ? '前売り券専用' : '通常販売'}</span>
+                  <small>受取{stationId} / 色紙：{stationId === 4 ? '白' : station.color}</small>
+                </button>
+              );
+            })()
           ))}
         </div>
         {message ? <p className="error">{message}</p> : null}

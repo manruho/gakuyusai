@@ -75,11 +75,18 @@ describe("saleRequestSchema", () => {
 });
 
 describe("validatePresaleRegister", () => {
-  it("前売り販売はレジ4だけを受け付ける", () => {
+  it("既定ではレジ4だけを前売り専用として扱う", () => {
     expect(validatePresaleRegister("presale_pickup", 4)).toBeNull();
     expect(validatePresaleRegister("presale_pickup", 3)?.code).toBe("PRESALE_REGISTER_ONLY");
     expect(validatePresaleRegister("normal", 3)).toBeNull();
     expect(validatePresaleRegister("normal", 4)?.code).toBe("REGISTER4_PRESALE_ONLY");
+  });
+
+  it('設定で前売り専用にしたレジは前売りだけを受け付ける', () => {
+    expect(validatePresaleRegister('presale_pickup', 1, 'presale_pickup')).toBeNull();
+    expect(validatePresaleRegister('normal', 1, 'presale_pickup')?.code).toBe('REGISTER_MODE_MISMATCH');
+    expect(validatePresaleRegister('normal', 2, 'normal')).toBeNull();
+    expect(validatePresaleRegister('presale_pickup', 2, 'normal')?.code).toBe('REGISTER_MODE_MISMATCH');
   });
 });
 

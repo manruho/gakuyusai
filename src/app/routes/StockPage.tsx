@@ -3,6 +3,16 @@ import { formatYen } from '../../lib/money';
 
 type Item = { id: string; display_name?: string; displayName?: string; category?: string; price: number; initial_stock?: number; initialStock?: number; current_stock?: number; currentStock?: number; sold_quantity?: number; soldQuantity?: number };
 type HistoryItem = { id: string; product_id: string; display_name: string; event_type: string; quantity_delta: number; reason: string; created_by_role: string; created_at: string };
+type NoonRestockStatus = {
+  businessDate: string;
+  applied: boolean;
+  alreadyApplied: boolean;
+  itemCount: number;
+  totalQuantity: number;
+  appliedAt: string | null;
+  appliedByUsername: string | null;
+  items: Array<{ productId: string; displayName: string; quantity: number }>;
+};
 
 export function StockPage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -10,6 +20,8 @@ export function StockPage() {
   const [historyQuery, setHistoryQuery] = useState('');
   const [message, setMessage] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('すべて');
+  const [noonRestock, setNoonRestock] = useState<NoonRestockStatus | null>(null);
+  const [isApplyingNoonRestock, setIsApplyingNoonRestock] = useState(false);
 
   const load = async (query = '') => {
     const searchParams = query ? `&q=${encodeURIComponent(query)}` : '';
@@ -21,9 +33,24 @@ export function StockPage() {
     if (historyJson.ok) setHistory(historyJson.data.items);
   };
 
+  const loadNoonRestock = async () => {
+    try {
+      const response = await fetch('/api/staff/stock/noon-restock');
+      const json = (await response.json()) as { ok: true; data: NoonRestockStatus } | { ok: false; error: { message: string } };
+      if (json.ok) setNoonRestock(json.data);
+      else setMessage(json.error.message);
+    } catch {
+      setMessage('12時分の一括補充状態を確認できませんでした。');
+    }
+  };
+
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 30_000);
+    void loadNoonRestock();
+    const timer = window.setInterval(() => {
+      void load();
+      void loadNoonRestock();
+    }, 30_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -53,6 +80,35 @@ export function StockPage() {
     await adjust(item.id, actualStock - currentStock, 'adjust');
   };
 
+  const applyNoonRestock = async () => {
+    if (!noonRestock || noonRestock.applied || isApplyingNoonRestock) return;
+    if (!window.confirm(
+      `${noonRestock.businessDate}の12時分として、${noonRestock.itemCount}商品・合計${noonRestock.totalQuantity}個を一括補充します。\n同じ日には一度だけ実行できます。よろしいですか？`,
+    )) return;
+
+    setIsApplyingNoonRestock(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/staff/stock/noon-restock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'APPLY_NOON_RESTOCK' }),
+      });
+      const json = (await response.json()) as { ok: true; data: NoonRestockStatus } | { ok: false; error: { message: string } };
+      if (!json.ok) {
+        setMessage(json.error.message);
+        return;
+      }
+      setNoonRestock(json.data);
+      setMessage(json.data.alreadyApplied ? '本日の12時一括補充はすでに実施済みです。' : '12時分の在庫を一括補充しました。');
+      await load(historyQuery.trim());
+    } catch {
+      setMessage('12時分の一括補充に失敗しました。通信状態を確認してください。');
+    } finally {
+      setIsApplyingNoonRestock(false);
+    }
+  };
+
   const categories = useMemo(() => ['すべて', ...Array.from(new Set(items.map((item) => item.category || 'その他')))], [items]);
   const visibleItems = useMemo(() => selectedCategory === 'すべて' ? items : items.filter((item) => (item.category || 'その他') === selectedCategory), [items, selectedCategory]);
   const totals = useMemo(() => items.reduce((summary, item) => {
@@ -75,6 +131,36 @@ export function StockPage() {
           <div><span>現在の総在庫</span><strong>{totals.current}</strong><small>個・本</small></div>
           <div><span>販売済み</span><strong>{totals.sold}</strong><small>個・本</small></div>
           <div className={totals.attention ? 'needs-attention' : ''}><span>残り少ない</span><strong>{totals.attention}</strong><small>品</small></div>
+        </section>
+        <section className={`noon-restock-panel${noonRestock?.applied ? ' is-applied' : ''}`} aria-labelledby="noon-restock-heading">
+          <div className="noon-restock-copy">
+            <p className="eyebrow">12:00 Restock</p>
+            <h2 id="noon-restock-heading">12時分の一括補充</h2>
+            <p>おにぎり16種を465個、唐揚げを200個追加します。時刻による自動実行はなく、このボタンを押したときだけ反映されます。</p>
+            {noonRestock?.applied ? (
+              <p className="noon-restock-status" role="status">
+                実施済み：{new Date(noonRestock.appliedAt ?? '').toLocaleString('ja-JP')} / {noonRestock.appliedByUsername ?? '不明'}
+              </p>
+            ) : <p className="noon-restock-status is-pending">本日分は未実施です。</p>}
+          </div>
+          <div className="noon-restock-action">
+            <strong>合計 {noonRestock?.totalQuantity ?? 665}個</strong>
+            <button
+              type="button"
+              onClick={() => void applyNoonRestock()}
+              disabled={!noonRestock || noonRestock.applied || isApplyingNoonRestock}
+            >
+              {isApplyingNoonRestock ? '補充しています…' : noonRestock?.applied ? '本日分は実施済み' : '12時分を一括補充'}
+            </button>
+          </div>
+          <details className="noon-restock-details">
+            <summary>補充する商品と個数を確認</summary>
+            <div>
+              {(noonRestock?.items ?? []).map((item) => (
+                <span key={item.productId}>{item.displayName}<strong>+{item.quantity}</strong></span>
+              ))}
+            </div>
+          </details>
         </section>
         <nav className="inventory-category-tabs" aria-label="在庫カテゴリ">
           {categories.map((category) => <button key={category} type="button" className={selectedCategory === category ? 'is-active' : ''} onClick={() => setSelectedCategory(category)}>{category === '飲み物' ? 'のみもの' : category}<strong>{category === 'すべて' ? items.length : items.filter((item) => (item.category || 'その他') === category).length}</strong></button>)}

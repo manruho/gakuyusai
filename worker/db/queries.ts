@@ -8,6 +8,7 @@ export type ProductRow = {
   price: number;
   initial_stock: number;
   current_stock: number;
+  presale_sold_quantity: number;
   is_public: number;
   is_active: number;
   sort_order: number;
@@ -25,6 +26,14 @@ export async function queryProducts(db: D1Database, onlyPublic = false): Promise
   const where = onlyPublic ? 'WHERE p.is_public = 1 AND p.is_active = 1 AND p.deleted_at IS NULL' : 'WHERE p.deleted_at IS NULL';
   const rows = await db.prepare(
     `SELECT p.id, p.name, p.display_name, p.category, p.price, p.initial_stock, i.current_stock,
+            COALESCE((
+              SELECT SUM(si.quantity)
+              FROM sale_items si
+              JOIN sales s ON s.id = si.sale_id
+              WHERE si.product_id = p.id
+                AND s.sale_type = 'presale_pickup'
+                AND s.status = 'completed'
+            ), 0) AS presale_sold_quantity,
             p.is_public, p.is_active, p.sort_order, p.allergy_text, p.description, p.note,
             p.created_at, p.updated_at, i.updated_at AS inventory_updated_at
      FROM products p

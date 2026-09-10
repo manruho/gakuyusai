@@ -123,6 +123,170 @@ describe('Workers API with a real D1 binding', () => {
     expect(valid.status).toBe(200);
   });
 
+  it('applies an independent presale mode to register 1, routes it to pickup 4, and preserves retries after a mode change', async () => {
+    const ownerCookie = await login('owner');
+    const enable = await request('/api/admin/settings', jsonRequest('PUT', {
+      register_1_presale_enabled: 'true',
+    }, ownerCookie));
+    expect(enable.status).toBe(200);
+
+    try {
+      const config = await request('/api/staff/register/config', { headers: { Cookie: ownerCookie } });
+      expect(config.status).toBe(200);
+      await expect(config.json()).resolves.toMatchObject({
+        data: {
+          registers: expect.arrayContaining([
+            { registerId: 1, saleType: 'presale_pickup', stationId: 4, configurable: true },
+            { registerId: 4, saleType: 'presale_pickup', stationId: 4, configurable: false },
+          ]),
+        },
+      });
+
+      const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 1 }, ownerCookie));
+      expect(select.status).toBe(200);
+      const selectedCookie = select.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+      const idempotencyKey = crypto.randomUUID();
+      const presaleRequest = {
+        idempotencyKey,
+        saleType: 'presale_pickup',
+        paymentMethod: 'cash',
+        paidAmount: 500,
+        items: [{ productId: 'onigiri_ume_official', quantity: 1 }],
+      } as const;
+      const presale = await request('/api/sales', jsonRequest('POST', presaleRequest, selectedCookie));
+      expect(presale.status, await presale.clone().text()).toBe(200);
+      const presaleBody = await presale.json<{ data: { saleId: string; stationId: number; registerId: number } }>();
+      expect(presaleBody.data).toMatchObject({ registerId: 1, stationId: 4 });
+
+      const stored = await env.DB.prepare(
+        `SELECT s.sale_type, s.register_id, fo.station_id
+         FROM sales s JOIN fulfillment_orders fo ON fo.sale_id = s.id
+         WHERE s.register_id = 1 AND s.sale_type = 'presale_pickup'
+         ORDER BY s.created_at DESC LIMIT 1`,
+      ).first<{ sale_type: string; register_id: number; station_id: number }>();
+      expect(stored).toMatchObject({ sale_type: 'presale_pickup', register_id: 1, station_id: 4 });
+
+      const normal = await request('/api/sales', jsonRequest('POST', {
+        idempotencyKey: crypto.randomUUID(),
+        saleType: 'normal',
+        paymentMethod: 'cash',
+        paidAmount: 500,
+        items: [{ productId: 'onigiri_ume_official', quantity: 1 }],
+      }, selectedCookie));
+      expect(normal.status).toBe(403);
+      await expect(normal.json()).resolves.toMatchObject({ error: { code: 'REGISTER_MODE_MISMATCH' } });
+
+      const disable = await request('/api/admin/settings', jsonRequest('PUT', {
+        register_1_presale_enabled: 'false',
+      }, ownerCookie));
+      expect(disable.status).toBe(200);
+
+      const retry = await request('/api/sales', jsonRequest('POST', presaleRequest, selectedCookie));
+      expect(retry.status, await retry.clone().text()).toBe(200);
+      await expect(retry.json()).resolves.toMatchObject({
+        data: { saleId: presaleBody.data.saleId, registerId: 1, stationId: 4 },
+      });
+      const duplicateCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM sales WHERE idempotency_key = ?')
+        .bind(idempotencyKey).first<{ count: number }>();
+      expect(duplicateCount?.count).toBe(1);
+    } finally {
+      const disable = await request('/api/admin/settings', jsonRequest('PUT', {
+        register_1_presale_enabled: 'false',
+      }, ownerCookie));
+      expect(disable.status).toBe(200);
+    }
+  });
+
+  it('limits each product presale to 30 percent of initial stock and keeps retries idempotent', async () => {
+    let cookie = await login('owner');
+    const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 4 }, cookie));
+    expect(select.status).toBe(200);
+    cookie = select.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+
+    const productId = 'onigiri_shiso_kombu';
+    const before = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind(productId).first<{ current_stock: number }>();
+    const idempotencyKey = crypto.randomUUID();
+    const atLimitRequest = {
+      idempotencyKey,
+      saleType: 'presale_pickup',
+      paymentMethod: 'cash',
+      paidAmount: 1500,
+      items: [{ productId, quantity: 6 }],
+    } as const;
+
+    const atLimit = await request('/api/sales', jsonRequest('POST', atLimitRequest, cookie));
+    expect(atLimit.status, await atLimit.clone().text()).toBe(200);
+    const atLimitBody = await atLimit.json<{ data: { saleId: string; pickupCode: string } }>();
+    const retry = await request('/api/sales', jsonRequest('POST', atLimitRequest, cookie));
+    expect(retry.status, await retry.clone().text()).toBe(200);
+    await expect(retry.json()).resolves.toMatchObject({ data: { saleId: atLimitBody.data.saleId } });
+
+    const products = await request('/api/staff/register/products', { headers: { Cookie: cookie } });
+    const productsBody = await products.json<{ data: { items: Array<{ id: string; presaleRemaining: number; isPresaleLimitReached: boolean }> } }>();
+    expect(productsBody.data.items.find((item) => item.id === productId)).toMatchObject({
+      presaleRemaining: 0,
+      isPresaleLimitReached: true,
+    });
+
+    const unaffectedProductId = 'onigiri_shio';
+    const unaffectedBefore = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind(unaffectedProductId).first<{ current_stock: number }>();
+    const rejectedKey = crypto.randomUUID();
+    const rejected = await request('/api/sales', jsonRequest('POST', {
+      idempotencyKey: rejectedKey,
+      saleType: 'presale_pickup',
+      paymentMethod: 'cash',
+      paidAmount: 500,
+      items: [{ productId, quantity: 1 }, { productId: unaffectedProductId, quantity: 1 }],
+    }, cookie));
+    expect(rejected.status).toBe(409);
+    await expect(rejected.json()).resolves.toMatchObject({ error: { code: 'PRESALE_LIMIT_EXCEEDED' } });
+
+    const after = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind(productId).first<{ current_stock: number }>();
+    const unaffectedAfter = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind(unaffectedProductId).first<{ current_stock: number }>();
+    const rejectedSale = await env.DB.prepare('SELECT COUNT(*) AS count FROM sales WHERE idempotency_key = ?')
+      .bind(rejectedKey).first<{ count: number }>();
+    expect(after?.current_stock).toBe((before?.current_stock ?? 0) - 6);
+    expect(unaffectedAfter?.current_stock).toBe(unaffectedBefore?.current_stock);
+    expect(rejectedSale?.count).toBe(0);
+
+    await env.DB.prepare('UPDATE fulfillment_orders SET pickup_date = ? WHERE sale_id = ?')
+      .bind('2020-01-01', atLimitBody.data.saleId).run();
+    const pickup = await request(`/api/pickup/orders?stationId=4&q=${encodeURIComponent(atLimitBody.data.pickupCode)}`, { headers: { Cookie: cookie } });
+    expect(pickup.status).toBe(200);
+    await expect(pickup.json()).resolves.toMatchObject({
+      data: { items: [expect.objectContaining({ sale_id: atLimitBody.data.saleId, pickup_date: '2020-01-01' })] },
+    });
+  });
+
+  it('allows only one concurrent sale for the last presale slot', async () => {
+    let cookie = await login('owner');
+    const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 4 }, cookie));
+    cookie = select.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+    const productId = 'onigiri_takana_chirimen';
+    await env.DB.prepare('UPDATE products SET initial_stock = 4 WHERE id = ?').bind(productId).run();
+    await env.DB.prepare('UPDATE product_inventory SET current_stock = 4 WHERE product_id = ?').bind(productId).run();
+
+    const makeRequest = () => request('/api/sales', jsonRequest('POST', {
+      idempotencyKey: crypto.randomUUID(),
+      saleType: 'presale_pickup',
+      paymentMethod: 'cash',
+      paidAmount: 250,
+      items: [{ productId, quantity: 1 }],
+    }, cookie));
+    const responses = await Promise.all([makeRequest(), makeRequest()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const sold = await env.DB.prepare(
+      `SELECT COALESCE(SUM(si.quantity), 0) AS quantity
+       FROM sale_items si JOIN sales s ON s.id = si.sale_id
+       WHERE si.product_id = ? AND s.sale_type = 'presale_pickup' AND s.status = 'completed'`,
+    ).bind(productId).first<{ quantity: number }>();
+    expect(sold?.quantity).toBe(1);
+  });
+
   it('rejects duplicate products, returns 404 on missing updates, and always soft-deletes', async () => {
     const cookie = await login('owner');
     const product = {
@@ -184,6 +348,52 @@ describe('Workers API with a real D1 binding', () => {
     expect(await csv.text()).toContain('onigiri_shio');
   });
 
+  it('applies the manual noon restock atomically only once per business date', async () => {
+    const cookie = await login('admin');
+    const before = await env.DB.prepare(
+      `SELECT product_id, current_stock
+       FROM product_inventory
+       WHERE product_id IN ('onigiri_shio', 'side_karaage_official')`,
+    ).all<{ product_id: string; current_stock: number }>();
+    const beforeByProduct = new Map((before.results ?? []).map((row) => [row.product_id, row.current_stock]));
+
+    const unconfirmed = await request('/api/staff/stock/noon-restock', jsonRequest('POST', {}, cookie));
+    expect(unconfirmed.status).toBe(400);
+
+    const responses = await Promise.all([
+      request('/api/staff/stock/noon-restock', jsonRequest('POST', { confirmation: 'APPLY_NOON_RESTOCK' }, cookie)),
+      request('/api/staff/stock/noon-restock', jsonRequest('POST', { confirmation: 'APPLY_NOON_RESTOCK' }, cookie)),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const bodies = await Promise.all(responses.map((response) => response.json<{
+      data: { applied: boolean; alreadyApplied: boolean; itemCount: number; totalQuantity: number };
+    }>()));
+    expect(bodies.map((body) => body.data.alreadyApplied).sort()).toEqual([false, true]);
+    expect(bodies[0].data).toMatchObject({ applied: true, itemCount: 17, totalQuantity: 665 });
+
+    const after = await env.DB.prepare(
+      `SELECT product_id, current_stock
+       FROM product_inventory
+       WHERE product_id IN ('onigiri_shio', 'side_karaage_official')`,
+    ).all<{ product_id: string; current_stock: number }>();
+    const afterByProduct = new Map((after.results ?? []).map((row) => [row.product_id, row.current_stock]));
+    expect(afterByProduct.get('onigiri_shio')).toBe((beforeByProduct.get('onigiri_shio') ?? 0) + 35);
+    expect(afterByProduct.get('side_karaage_official')).toBe((beforeByProduct.get('side_karaage_official') ?? 0) + 200);
+
+    const batchCount = await env.DB.prepare('SELECT COUNT(*) AS count FROM stock_restock_batches')
+      .first<{ count: number }>();
+    expect(batchCount?.count).toBe(1);
+    const eventCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM stock_events WHERE reason LIKE '12時一括補充%' ")
+      .first<{ count: number }>();
+    expect(eventCount?.count).toBe(17);
+
+    const status = await request('/api/staff/stock/noon-restock', { headers: { Cookie: cookie } });
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      data: { applied: true, itemCount: 17, totalQuantity: 665, appliedByUsername: 'admin-test' },
+    });
+  });
+
   it('commits a concurrent idempotent checkout only once', async () => {
     let cookie = await login('owner');
     const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 1 }, cookie));
@@ -214,6 +424,49 @@ describe('Workers API with a real D1 binding', () => {
     const sales = await env.DB.prepare('SELECT COUNT(*) AS count FROM sales WHERE idempotency_key = ?')
       .bind(idempotencyKey).first<{ count: number }>();
     expect(sales?.count).toBe(1);
+  });
+
+  it('reserves a pickup code before payment, completes it once, and exposes payment state to pickup', async () => {
+    let cookie = await login('owner');
+    const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 1 }, cookie));
+    cookie = select.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+    const before = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind('onigiri_shio').first<{ current_stock: number }>();
+    const draftResponse = await request('/api/staff/register/checkout-drafts', jsonRequest('POST', {
+      idempotencyKey: crypto.randomUUID(), saleType: 'normal', items: [{ productId: 'onigiri_shio', quantity: 1 }],
+    }, cookie));
+    expect(draftResponse.status, await draftResponse.clone().text()).toBe(200);
+    const draft = await draftResponse.json<{ data: { draftId: string; pickupCode: string; status: string } }>();
+    expect(draft.data).toMatchObject({ status: 'awaiting_payment' });
+    expect(draft.data.pickupCode).toHaveLength(4);
+    const afterReserve = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind('onigiri_shio').first<{ current_stock: number }>();
+    expect(afterReserve?.current_stock).toBe((before?.current_stock ?? 0) - 1);
+
+    const completionRequest = jsonRequest('POST', { paymentMethod: 'cash', paidAmount: 500 }, cookie);
+    const completed = await request(`/api/staff/register/checkout-drafts/${draft.data.draftId}/complete`, completionRequest);
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    const completedBody = await completed.json<{ data: { saleId: string; pickupCode: string } }>();
+    expect(completedBody.data.pickupCode).toBe(draft.data.pickupCode);
+    const retry = await request(`/api/staff/register/checkout-drafts/${draft.data.draftId}/complete`, completionRequest);
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toMatchObject({ data: { saleId: completedBody.data.saleId, pickupCode: draft.data.pickupCode } });
+    const after = await env.DB.prepare('SELECT current_stock FROM product_inventory WHERE product_id = ?')
+      .bind('onigiri_shio').first<{ current_stock: number }>();
+    expect(after?.current_stock).toBe((before?.current_stock ?? 0) - 1);
+  });
+
+  it('releases an unpaid reservation on cancel and keeps it available for pickup acknowledgement', async () => {
+    let cookie = await login('owner');
+    const select = await request('/api/staff/register/select', jsonRequest('POST', { registerId: 1 }, cookie));
+    cookie = select.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+    const draftResponse = await request('/api/staff/register/checkout-drafts', jsonRequest('POST', {
+      idempotencyKey: crypto.randomUUID(), saleType: 'normal', items: [{ productId: 'onigiri_shio', quantity: 1 }],
+    }, cookie));
+    const draft = await draftResponse.json<{ data: { draftId: string } }>();
+    expect((await request(`/api/staff/register/checkout-drafts/${draft.data.draftId}/cancel`, { method: 'POST', headers: { Cookie: cookie } })).status).toBe(200);
+    const stored = await env.DB.prepare('SELECT status, cancel_reason FROM checkout_drafts WHERE id = ?').bind(draft.data.draftId).first<{ status: string; cancel_reason: string }>();
+    expect(stored).toMatchObject({ status: 'canceled', cancel_reason: 'レジで取消' });
   });
 
   it('atomically locks concurrent failures and bounds unknown usernames to one subject per IP', async () => {

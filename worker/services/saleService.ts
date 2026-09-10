@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { createId } from "../../src/lib/ids";
+import type { RegisterSaleType } from './settingsService';
 
-export const PICKUP_CODE_CHARS = '23479ACDEFHJKMNPQRTUVWXYZ';
+export const PICKUP_CODE_CHARS = '3479ACDEFHJKMNPQRTUVWXY';
 const PICKUP_CODE_LENGTH = 4;
 
 const saleItemSchema = z.object({
@@ -67,19 +68,21 @@ export function validateSalePayment(
   return null;
 }
 
-export function validatePresaleRegister(saleType: SaleRequest['saleType'], registerId: 1 | 2 | 3 | 4): SaleError | null {
-  if (saleType === 'presale_pickup' && registerId !== 4) {
+export function validatePresaleRegister(
+  saleType: SaleRequest['saleType'],
+  registerId: 1 | 2 | 3 | 4,
+  configuredSaleType?: RegisterSaleType,
+): SaleError | null {
+  const expectedSaleType = configuredSaleType ?? (registerId === 4 ? 'presale_pickup' : 'normal');
+  if (saleType !== expectedSaleType) {
     return {
       status: 403,
-      code: 'PRESALE_REGISTER_ONLY',
-      message: '前売り券の販売はレジ4でのみ利用できます。',
-    };
-  }
-  if (saleType === 'normal' && registerId === 4) {
-    return {
-      status: 403,
-      code: 'REGISTER4_PRESALE_ONLY',
-      message: 'レジ4は前売り券専用です。',
+      code: configuredSaleType === undefined
+        ? saleType === 'presale_pickup' ? 'PRESALE_REGISTER_ONLY' : 'REGISTER4_PRESALE_ONLY'
+        : 'REGISTER_MODE_MISMATCH',
+      message: expectedSaleType === 'presale_pickup'
+        ? 'このレジは前売り券専用です。'
+        : 'このレジは通常販売専用です。',
     };
   }
   return null;
@@ -117,13 +120,16 @@ type SaleRecord = {
   canceled_at: string | null;
   pickup_code?: string | null;
   register_id?: number;
+  station_id?: number;
 };
 
 type ProductRow = {
   id: string;
   display_name: string;
   price: number;
+  initial_stock: number;
   current_stock: number;
+  presale_sold_quantity: number;
 };
 
 type SaleLineItem = {
@@ -185,6 +191,10 @@ function buildStockEventStatements(
   ])));
 }
 
+export function getPresaleLimit(initialStock: number): number {
+  return Math.floor(initialStock * 3 / 10);
+}
+
 async function matchesIdempotencyRequest(
   db: D1Database,
   sale: SaleRecord,
@@ -228,7 +238,7 @@ async function findSaleByIdempotencyKey(
     .prepare(
       `SELECT s.id, s.idempotency_key, s.sale_type, s.total_amount, s.paid_amount, s.change_amount,
               s.payment_method, s.status, s.created_by_role, s.created_at, s.canceled_at,
-              s.register_id, fo.pickup_code
+              s.register_id, fo.station_id, fo.pickup_code
        FROM sales s
        LEFT JOIN fulfillment_orders fo ON fo.sale_id = s.id
        WHERE s.idempotency_key = ?`,
@@ -248,19 +258,19 @@ function reusedSaleResult(sale: SaleRecord): SaleResult {
     reused: true,
     pickupCode: sale.pickup_code ?? '',
     registerId: (sale.register_id ?? 1) as 1 | 2 | 3 | 4,
-    stationId: (sale.register_id ?? 1) as 1 | 2 | 3 | 4,
+    stationId: (sale.station_id ?? (sale.sale_type === 'presale_pickup' ? 4 : sale.register_id ?? 1)) as 1 | 2 | 3 | 4,
     createdAt: sale.created_at,
     items: [],
   };
 }
 
-function getBusinessDate(offsetDays = 0): string {
+function getBusinessDate(offsetDays = 0, now = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(now);
   const values = new Map(parts.map((part) => [part.type, part.value]));
   const date = new Date(Date.UTC(
     Number(values.get('year')),
@@ -268,6 +278,10 @@ function getBusinessDate(offsetDays = 0): string {
     Number(values.get('day')) + offsetDays,
   ));
   return date.toISOString().slice(0, 10);
+}
+
+export function getPresalePickupStartDate(now = new Date()): string {
+  return getBusinessDate(1, now);
 }
 
 export function generatePickupCode(length = PICKUP_CODE_LENGTH): string {
@@ -281,7 +295,7 @@ export async function processSale(
   role: "staff" | "admin" | "owner",
   registerId: 1 | 2 | 3 | 4,
   request: unknown,
-  options: { salesDay?: SalesDay } = {},
+  options: { salesDay?: SalesDay; registerSaleType?: RegisterSaleType; stationId?: 1 | 2 | 3 | 4 } = {},
 ): Promise<SaleResult | { error: SaleError }> {
   let idempotencyKey: string | null = null;
   try {
@@ -297,10 +311,6 @@ export async function processSale(
     }
 
     const body = parsed.data;
-    const registerError = validatePresaleRegister(body.saleType, registerId);
-    if (registerError) return { error: registerError };
-    const salesDayError = validateSalesDay(options.salesDay ?? 'all', body.saleType);
-    if (salesDayError) return { error: salesDayError };
     idempotencyKey = body.idempotencyKey;
     const existing = await findSaleByIdempotencyKey(db, body.idempotencyKey);
     if (existing) {
@@ -316,9 +326,22 @@ export async function processSale(
       return reusedSaleResult(existing);
     }
 
+    const registerError = validatePresaleRegister(body.saleType, registerId, options.registerSaleType);
+    if (registerError) return { error: registerError };
+    const salesDayError = validateSalesDay(options.salesDay ?? 'all', body.saleType);
+    if (salesDayError) return { error: salesDayError };
+
     const productsRows = await db
       .prepare(
-        `SELECT p.id, p.display_name, p.price, i.current_stock
+        `SELECT p.id, p.display_name, p.price, p.initial_stock, i.current_stock,
+                COALESCE((
+                  SELECT SUM(si.quantity)
+                  FROM sale_items si
+                  JOIN sales s ON s.id = si.sale_id
+                  WHERE si.product_id = p.id
+                    AND s.sale_type = 'presale_pickup'
+                    AND s.status = 'completed'
+                ), 0) AS presale_sold_quantity
          FROM products p
          JOIN product_inventory i ON i.product_id = p.id
          WHERE p.id IN (${body.items.map(() => "?").join(",")})
@@ -340,6 +363,12 @@ export async function processSale(
       if (product.current_stock < item.quantity) {
         throw new Error("INSUFFICIENT_STOCK");
       }
+      if (
+        body.saleType === 'presale_pickup' &&
+        product.presale_sold_quantity + item.quantity > getPresaleLimit(product.initial_stock)
+      ) {
+        throw new Error('PRESALE_LIMIT_EXCEEDED');
+      }
       return {
         product,
         quantity: item.quantity,
@@ -354,7 +383,7 @@ export async function processSale(
     const saleId = createId("sale");
     const now = new Date().toISOString();
     const businessDate = getBusinessDate();
-    const pickupDate = body.saleType === 'presale_pickup' ? getBusinessDate(1) : businessDate;
+    const pickupDate = body.saleType === 'presale_pickup' ? getPresalePickupStartDate() : businessDate;
     let pickupCode = '';
     let committed = false;
     for (let attempt = 0; attempt < 10 && !committed; attempt += 1) {
@@ -384,7 +413,7 @@ export async function processSale(
           db.prepare(
             `INSERT INTO fulfillment_orders (id, sale_id, business_date, pickup_date, register_id, station_id, pickup_code, status, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-          ).bind(createId('fulfillment'), saleId, businessDate, pickupDate, registerId, registerId, pickupCode, now, now),
+          ).bind(createId('fulfillment'), saleId, businessDate, pickupDate, registerId, options.stationId ?? (body.saleType === 'presale_pickup' ? 4 : registerId), pickupCode, now, now),
           db.prepare(
             `INSERT INTO fulfillment_events (id, fulfillment_order_id, event_type, from_status, to_status, actor_role, actor_username, created_at)
              SELECT ?, id, 'created', NULL, 'pending', ?, ?, ? FROM fulfillment_orders WHERE sale_id = ?`,
@@ -417,7 +446,7 @@ export async function processSale(
       reused: false,
       pickupCode,
       registerId,
-      stationId: registerId,
+      stationId: options.stationId ?? (body.saleType === 'presale_pickup' ? 4 : registerId),
       createdAt: now,
       items: lineItems.map((item) => ({
         productId: item.product.id,
@@ -444,6 +473,15 @@ export async function processSale(
           status: 409,
           code: "INSUFFICIENT_STOCK",
           message: "在庫が不足しています。",
+        },
+      };
+    }
+    if (error instanceof Error && /PRESALE_LIMIT_EXCEEDED/.test(error.message)) {
+      return {
+        error: {
+          status: 409,
+          code: 'PRESALE_LIMIT_EXCEEDED',
+          message: '前売り上限に達している商品が含まれています。商品一覧を更新してください。',
         },
       };
     }

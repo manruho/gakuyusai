@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { generatePickupCode, PICKUP_CODE_CHARS } from '../../worker/services/saleService';
+import { generatePickupCode, getPresaleLimit, getPresalePickupStartDate, PICKUP_CODE_CHARS } from '../../worker/services/saleService';
 import { getPickupSaleType, getTokyoDate, isPickupAvailable, resolvePickupOrderScope } from '../../worker/services/fulfillmentService';
 
 describe('pickup code', () => {
   it('手書きで間違えやすい文字を含まない4文字コードを生成する', () => {
-    const forbidden = /[0168BGILOS]/;
+    const forbidden = /[012568BGILOSZ]/;
     for (let index = 0; index < 100; index += 1) {
       const code = generatePickupCode();
       expect(code).toHaveLength(4);
@@ -18,6 +18,7 @@ describe('pickup code', () => {
     const code = generatePickupCode(6);
     expect(code).toHaveLength(6);
     expect([...code].every((char) => PICKUP_CODE_CHARS.includes(char))).toBe(true);
+    expect(code).not.toMatch(/[2Z]/);
   });
 });
 
@@ -58,5 +59,25 @@ describe('pickup date in Japan', () => {
     expect(getTokyoDate(justBeforeMidnightUtc)).toBe('2026-08-27');
     expect(isPickupAvailable('2026-08-27', justBeforeMidnightUtc)).toBe(true);
     expect(isPickupAvailable('2026-08-28', justBeforeMidnightUtc)).toBe(false);
+  });
+
+  it('前売り券は受取開始日当日から期限なく受け取れる', () => {
+    const now = new Date('2026-08-26T03:00:00.000Z');
+    const startDate = getPresalePickupStartDate(now);
+    expect(startDate).toBe('2026-08-27');
+    expect(isPickupAvailable(startDate, now)).toBe(false);
+    expect(isPickupAvailable(startDate, new Date('2026-08-27T03:00:00.000Z'))).toBe(true);
+    expect(isPickupAvailable('2026-08-28', new Date('2026-08-28T03:00:00.000Z'))).toBe(true);
+    expect(isPickupAvailable('2026-08-29', new Date('2026-08-30T03:00:00.000Z'))).toBe(true);
+    expect(isPickupAvailable('2026-08-27', new Date('2026-08-26T03:00:00.000Z'))).toBe(false);
+  });
+});
+
+describe('presale product limit', () => {
+  it('初期在庫の30%を切り捨てる', () => {
+    expect(getPresaleLimit(35)).toBe(10);
+    expect(getPresaleLimit(54)).toBe(16);
+    expect(getPresaleLimit(10)).toBe(3);
+    expect(getPresaleLimit(0)).toBe(0);
   });
 });

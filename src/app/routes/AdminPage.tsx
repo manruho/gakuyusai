@@ -37,6 +37,9 @@ type Settings = {
   pickup_2_username: string;
   pickup_3_username: string;
   pickup_4_username: string;
+  register_1_presale_enabled: string;
+  register_2_presale_enabled: string;
+  register_3_presale_enabled: string;
 };
 
 type EditForm = {
@@ -129,6 +132,9 @@ const defaultSettings: Settings = {
   pickup_2_username: 'pickup-2',
   pickup_3_username: 'pickup-3',
   pickup_4_username: 'pickup-4',
+  register_1_presale_enabled: 'false',
+  register_2_presale_enabled: 'false',
+  register_3_presale_enabled: 'false',
 };
 
 export function AdminPage() {
@@ -422,6 +428,26 @@ export function AdminPage() {
               <span className="field-help">十分ある状態のラインです。</span>
               <input value={settings.threshold_high} onChange={(e) => setSettings((current) => ({ ...current, threshold_high: e.target.value }))} />
             </label>
+            <div className="admin-form-subhead"><strong>レジの販売モード</strong><span>レジ1〜3は個別に前売り券専用へ切り替えられます。レジ4は常に前売り券専用です。変更後は次の会計から反映されます。</span></div>
+            {[1, 2, 3].map((registerId) => {
+              const key = `register_${registerId}_presale_enabled` as keyof Settings;
+              const enabled = settings[key] === 'true';
+              return (
+                <label className="settings-toggle" key={registerId}>
+                  <span><strong>レジ{registerId}</strong><small>{enabled ? 'ON：前売り券専用' : 'OFF：通常レジ'}</small></span>
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(event) => setSettings((current) => ({ ...current, [key]: event.target.checked ? 'true' : 'false' }))}
+                    aria-label={`レジ${registerId}を前売り券専用にする`}
+                  />
+                </label>
+              );
+            })}
+            <div className="settings-toggle settings-toggle-fixed">
+              <span><strong>レジ4</strong><small>ON：前売り券専用（固定）</small></span>
+              <input type="checkbox" checked readOnly aria-label="レジ4は前売り券専用（固定）" />
+            </div>
             <div className="admin-form-subhead"><strong>受取窓口アカウント</strong><span>受取1〜4のログイン情報です。受取場所ごとに設定できます。</span></div>
             {[1, 2, 3, 4].map((stationId) => {
               const usernameKey = `pickup_${stationId}_username` as keyof Settings;
